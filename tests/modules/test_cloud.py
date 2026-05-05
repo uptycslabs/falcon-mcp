@@ -69,8 +69,13 @@ class TestCloudModule(TestModules):
         self.assertIn("details", result)
 
     def test_count_kubernetes_containers(self):
-        """Test count for kubernetes containers."""
-        mock_response = {"status_code": 200, "body": {"resources": [500]}}
+        """Test count for kubernetes containers — must return an int.
+
+        ReadContainerCount returns ``[{"count": <int>}]``; the wrapper unwraps
+        to honor the function's ``-> int`` return type so Pydantic's output
+        validator accepts it.
+        """
+        mock_response = {"status_code": 200, "body": {"resources": [{"count": 47273}]}}
         self.mock_client.command.return_value = mock_response
 
         result = self.module.count_kubernetes_containers(filter="cloud_region:'us-1'")
@@ -80,7 +85,28 @@ class TestCloudModule(TestModules):
         first_call = self.mock_client.command.call_args_list[0]
         self.assertEqual(first_call[0][0], "ReadContainerCount")
         self.assertEqual(first_call[1]["parameters"]["filter"], "cloud_region:'us-1'")
-        self.assertEqual(result, [500])
+        self.assertIsInstance(result, int)
+        self.assertEqual(result, 47273)
+
+    def test_count_kubernetes_containers_empty_resources(self):
+        """Empty resources list → 0 (default count)."""
+        mock_response = {"status_code": 200, "body": {"resources": []}}
+        self.mock_client.command.return_value = mock_response
+
+        result = self.module.count_kubernetes_containers()
+
+        self.assertIsInstance(result, int)
+        self.assertEqual(result, 0)
+
+    def test_count_kubernetes_containers_malformed_resources(self):
+        """Malformed resources entry (missing 'count' key) → 0, not crash."""
+        mock_response = {"status_code": 200, "body": {"resources": [{"foo": "bar"}]}}
+        self.mock_client.command.return_value = mock_response
+
+        result = self.module.count_kubernetes_containers()
+
+        self.assertIsInstance(result, int)
+        self.assertEqual(result, 0)
 
     def test_count_kubernetes_containers_errors(self):
         """Test count for kubernetes containers with API error."""
