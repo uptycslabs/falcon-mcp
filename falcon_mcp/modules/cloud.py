@@ -187,13 +187,20 @@ class CloudModule(BaseModule):
         # Make the API request
         response = self.client.command(operation, parameters=params)
 
-        # Handle the response
-        return handle_api_response(
+        # Handle the response — the ReadContainerCount endpoint returns a list
+        # with a single dict like [{"count": <int>}], not a bare int. Unwrap it
+        # so the function honors its `-> int` return annotation; otherwise
+        # Pydantic's output validator rejects the response with
+        # "Input should be a valid integer".
+        result = handle_api_response(
             response,
             operation=operation,
             error_message="Failed to perform operation",
-            default_result=[],
+            default_result=[{"count": 0}],
         )
+        if isinstance(result, list) and result and isinstance(result[0], dict) and "count" in result[0]:
+            return int(result[0]["count"])
+        return 0
 
     def search_images_vulnerabilities(
         self,
