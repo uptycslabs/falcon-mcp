@@ -18,6 +18,11 @@ from falcon_mcp.common.utils import prepare_api_parameters
 
 logger = get_logger(__name__)
 
+# CrowdStrike's API gateway rejects POST bodies / query strings that contain
+# more than ~1000 entity IDs in a single call with HTTP 413 "request too large".
+# _base_get_by_ids chunks ID lists at this size and merges results.
+_GET_BY_IDS_BATCH_SIZE = 1000
+
 # Default: read-only tool that talks to an external API
 READ_ONLY_ANNOTATIONS = ToolAnnotations(
     readOnlyHint=True,
@@ -99,6 +104,14 @@ class BaseModule(ABC):
     ) -> list[dict[str, Any]] | dict[str, Any]:
         """Helper method for API operations that retrieve entities by IDs.
 
+        Large ID lists are auto-chunked at _GET_BY_IDS_BATCH_SIZE (1000) and the
+        per-chunk responses are concatenated in input order. additional_params is
+        passed unchanged on every chunk.
+
+        Error handling: if any chunk returns an error dict, this method aborts
+        immediately and returns that error — partial results from earlier chunks
+        are discarded, since the caller can't tell which IDs were missed.
+
         Args:
             operation: The API operation name
             ids: List of entity IDs
@@ -110,25 +123,36 @@ class BaseModule(ABC):
         Returns:
             List of entity details or error dict
         """
-        # Build the request params with dynamic ID key and additional parameters
-        request_params = {id_key: ids}
-        request_params.update(additional_params)
+        if not ids:
+            return []
 
-        prepared = prepare_api_parameters(request_params)
+        aggregated: list[dict[str, Any]] = []
+        for start in range(0, len(ids), _GET_BY_IDS_BATCH_SIZE):
+            chunk = ids[start:start + _GET_BY_IDS_BATCH_SIZE]
+            request_params = {id_key: chunk}
+            request_params.update(additional_params)
+            prepared = prepare_api_parameters(request_params)
 
-        # Make the API request using either parameters (GET) or body (POST)
-        if use_params:
-            response = self.client.command(operation, parameters=prepared)
-        else:
-            response = self.client.command(operation, body=prepared)
+            if use_params:
+                response = self.client.command(operation, parameters=prepared)
+            else:
+                response = self.client.command(operation, body=prepared)
 
-        # Handle the response
-        return handle_api_response(
-            response,
-            operation=operation,
-            error_message="Failed to perform operation",
-            default_result=[],
-        )
+            result = handle_api_response(
+                response,
+                operation=operation,
+                error_message="Failed to perform operation",
+                default_result=[],
+            )
+
+            # Propagate the first error dict we see; partial results aren't useful
+            # because the caller can't tell which IDs were missed.
+            if isinstance(result, dict):
+                return result
+            if isinstance(result, list):
+                aggregated.extend(result)
+
+        return aggregated
 
     def _base_search_api_call(
         self,

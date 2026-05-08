@@ -182,6 +182,156 @@ class TestBaseModule(TestModules):
         # Verify result is empty list
         self.assertEqual(result, [])
 
+    def test_base_get_by_ids_empty_id_list_skips_api(self):
+        """Test _base_get_by_ids with [] returns [] without calling the API."""
+        result = self.module._base_get_by_ids("TestOperation", [])
+        self.assertEqual(result, [])
+        self.mock_client.command.assert_not_called()
+
+    def test_base_get_by_ids_chunks_large_id_list(self):
+        """Test _base_get_by_ids splits >1000 IDs into 1000-item chunks and merges results.
+
+        CrowdStrike's API gateway returns HTTP 413 'request too large' when a single
+        POST body contains more than ~1000 entity IDs. The helper must batch.
+        """
+        ids = [f"id{i:04d}" for i in range(2500)]
+
+        # Each call returns one resource per ID in the chunk.
+        def fake_command(_op, body=None, parameters=None):
+            chunk = (body or parameters)["composite_ids"]
+            return {
+                "status_code": 200,
+                "body": {"resources": [{"composite_id": cid} for cid in chunk]},
+            }
+
+        self.mock_client.command.side_effect = fake_command
+
+        result = self.module._base_get_by_ids(
+            "PostEntitiesAlertsV2", ids, id_key="composite_ids"
+        )
+
+        # Three chunks: 1000 + 1000 + 500.
+        self.assertEqual(self.mock_client.command.call_count, 3)
+        chunk_sizes = [
+            len(call.kwargs["body"]["composite_ids"])
+            for call in self.mock_client.command.call_args_list
+        ]
+        self.assertEqual(chunk_sizes, [1000, 1000, 500])
+
+        # Aggregated result preserves order and contains every ID.
+        self.assertEqual(len(result), 2500)
+        self.assertEqual([r["composite_id"] for r in result], ids)
+
+    def test_base_get_by_ids_chunked_first_chunk_error_aborts(self):
+        """Test _base_get_by_ids returns early on first chunk error without making more calls."""
+        ids = [f"id{i:04d}" for i in range(2500)]
+
+        # First chunk errors; we should never reach the second.
+        self.mock_client.command.return_value = {
+            "status_code": 400,
+            "body": {"errors": [{"message": "Invalid request"}]},
+        }
+
+        result = self.module._base_get_by_ids(
+            "PostEntitiesAlertsV2", ids, id_key="composite_ids"
+        )
+
+        self.assertEqual(self.mock_client.command.call_count, 1)
+        self.assertIn("error", result)
+        self.assertIn("Failed to perform operation", result["error"])
+
+    def test_base_get_by_ids_chunked_mid_stream_error_drops_partial(self):
+        """Test mid-stream error: chunk 2 of 3 errors → 2 calls made, chunk 1 results discarded.
+
+        Locks in the 'first error wins, drop partials' contract — if we ever switched to
+        returning partial results on error, this test would fail loudly.
+        """
+        ids = [f"id{i:04d}" for i in range(2500)]
+        chunk2_error = {
+            "status_code": 500,
+            "body": {"errors": [{"message": "transient backend"}]},
+        }
+
+        call_count = {"n": 0}
+
+        def fake_command(_op, body=None, parameters=None):
+            call_count["n"] += 1
+            if call_count["n"] == 2:
+                return chunk2_error
+            chunk = (body or parameters)["composite_ids"]
+            return {
+                "status_code": 200,
+                "body": {"resources": [{"composite_id": cid} for cid in chunk]},
+            }
+
+        self.mock_client.command.side_effect = fake_command
+
+        result = self.module._base_get_by_ids(
+            "PostEntitiesAlertsV2", ids, id_key="composite_ids"
+        )
+
+        # Exactly 2 calls — chunks 1 and 2 fired, chunk 3 never attempted.
+        self.assertEqual(self.mock_client.command.call_count, 2)
+        # Returned shape is the error dict, not the merged 1000-resource list from chunk 1.
+        self.assertIsInstance(result, dict)
+        self.assertIn("error", result)
+        self.assertIn("Failed to perform operation", result["error"])
+
+    def test_base_get_by_ids_chunked_additional_params_per_chunk(self):
+        """Test additional_params (e.g. include_hidden) ride along on every chunked call."""
+        ids = [f"id{i:04d}" for i in range(2500)]
+
+        def fake_command(_op, body=None, parameters=None):
+            chunk = (body or parameters)["composite_ids"]
+            return {
+                "status_code": 200,
+                "body": {"resources": [{"composite_id": cid} for cid in chunk]},
+            }
+
+        self.mock_client.command.side_effect = fake_command
+
+        self.module._base_get_by_ids(
+            "PostEntitiesAlertsV2",
+            ids,
+            id_key="composite_ids",
+            include_hidden=True,
+            sort_by="created_timestamp",
+        )
+
+        # Every chunk's body must carry the additional params unchanged.
+        self.assertEqual(self.mock_client.command.call_count, 3)
+        for call in self.mock_client.command.call_args_list:
+            body = call.kwargs["body"]
+            self.assertTrue(body["include_hidden"])
+            self.assertEqual(body["sort_by"], "created_timestamp")
+
+    def test_base_get_by_ids_chunked_use_params_true_get_path(self):
+        """Test use_params=True (GET): chunked IDs go in `parameters=` kwarg, not `body=`."""
+        ids = [f"id{i:04d}" for i in range(2500)]
+
+        def fake_command(_op, body=None, parameters=None):
+            self.assertIsNone(body, "use_params=True must not send a body")
+            self.assertIsNotNone(parameters, "use_params=True must send parameters")
+            chunk = parameters["ids"]
+            return {
+                "status_code": 200,
+                "body": {"resources": [{"id": rid} for rid in chunk]},
+            }
+
+        self.mock_client.command.side_effect = fake_command
+
+        result = self.module._base_get_by_ids(
+            "GetSomeEntities", ids, use_params=True
+        )
+
+        self.assertEqual(self.mock_client.command.call_count, 3)
+        chunk_sizes = [
+            len(call.kwargs["parameters"]["ids"])
+            for call in self.mock_client.command.call_args_list
+        ]
+        self.assertEqual(chunk_sizes, [1000, 1000, 500])
+        self.assertEqual(len(result), 2500)
+
     def test_base_search_api_call_success(self):
         """Test _base_search_api_call with successful response."""
         # Setup mock response
