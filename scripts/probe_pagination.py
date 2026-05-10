@@ -95,7 +95,8 @@ page2_ids = query_ids(FILTER, limit=PAGE, offset=PAGE)
 overlap = set(page1_ids) & set(page2_ids)
 print(f"page1: {len(page1_ids)} ids   page2: {len(page2_ids)} ids   overlap: {len(overlap)} (expected 0)")
 if overlap:
-    print("FAIL: pages overlap"); sys.exit(4)
+    print("FAIL: pages overlap")
+    sys.exit(4)
 
 # B. Chunked hydration: big ID list forces multi-batch path (>1000 IDs).
 # Fail loud if the tenant doesn't have enough detections to exercise batching —
