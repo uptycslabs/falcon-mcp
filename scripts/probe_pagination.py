@@ -12,6 +12,7 @@ import os
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Any
 
 ENV_FILE = Path.home() / ".config" / "falcon-mcp" / ".env"
 PAGE = 1000  # same value as the falcon-mcp internal hydration chunk
@@ -49,7 +50,7 @@ if not client.authenticate():
 # falcon_search_detections does on any internal failure, and can see exactly
 # which call returns what.
 class Probe(BaseModule):
-    def register_tools(self, server):  # noqa: D401
+    def register_tools(self, server: Any) -> None:  # noqa: D401
         pass
 
 
@@ -59,7 +60,7 @@ probe = Probe(client)
 def query_ids(filter_: str, limit: int, offset: int | None) -> list[str]:
     """Step 1: queries call → returns composite_ids."""
     # Use created_timestamp.desc — high-cardinality timestamps ⇒ stable paging.
-    params = {"filter": filter_, "limit": limit, "sort": "created_timestamp.desc"}
+    params: dict[str, Any] = {"filter": filter_, "limit": limit, "sort": "created_timestamp.desc"}
     if offset is not None:
         params["offset"] = offset
     result = probe._base_search_api_call(
@@ -67,12 +68,12 @@ def query_ids(filter_: str, limit: int, offset: int | None) -> list[str]:
         search_params=params,
         error_message="queries failed",
     )
-    if isinstance(result, dict) and "error" in result:
-        raise RuntimeError(f"queries error: {result['error']!r}")
-    return list(result)
+    if isinstance(result, dict):
+        raise RuntimeError(f"queries error: {result.get('error', result)!r}")
+    return [str(rid) for rid in result]
 
 
-def hydrate(ids: list[str]) -> list[dict]:
+def hydrate(ids: list[str]) -> list[dict[str, Any]]:
     """Step 2: hydration call(s) → exercises the patched chunking."""
     res = probe._base_get_by_ids(
         operation="PostEntitiesAlertsV2",
@@ -80,8 +81,8 @@ def hydrate(ids: list[str]) -> list[dict]:
         id_key="composite_ids",
         include_hidden=True,
     )
-    if isinstance(res, dict) and "error" in res:
-        raise RuntimeError(f"hydrate error: {res['error']!r}")
+    if isinstance(res, dict):
+        raise RuntimeError(f"hydrate error: {res.get('error', res)!r}")
     return res
 
 
