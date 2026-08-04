@@ -1,5 +1,8 @@
 """Integration tests for the Cloud module."""
 
+import time
+from typing import Any
+
 import pytest
 
 from falcon_mcp.modules.cloud import CloudModule
@@ -125,7 +128,15 @@ class TestCloudIntegration(BaseIntegrationTest):
 
         # Test cloud_security_assets_queries and cloud_security_assets_entities_get
         result = self.call_method(self.module.search_cspm_assets, limit=1)
-        self.assert_no_error(result, context="CSPM operation names")
+        self.assert_no_error(result, context="CSPM asset operation names")
+
+        # Test cspm_evaluations_iom_queries and cspm_evaluations_iom_entities
+        result = self.call_method(self.module.search_iom_findings, limit=1)
+        self.assert_no_error(result, context="IOM operation names")
+
+        # Test suppression rules override endpoints
+        result = self.call_method(self.module.search_cspm_suppression_rules, limit=1)
+        self.assert_no_error(result, context="Suppression rules override operation names")
 
     def test_search_cspm_assets_returns_details(self):
         """Test that search_cspm_assets returns full asset details using two-step pattern.
@@ -184,7 +195,12 @@ class TestCloudIntegration(BaseIntegrationTest):
         )
 
         self.assert_no_error(result, context="search_cspm_assets with tag filter")
-        self.assert_valid_list_response(result, min_length=0, context="search_cspm_assets with tag filter")
+        # May return empty dict if no assets match; both are valid
+        if isinstance(result, list):
+            self.assert_valid_list_response(result, min_length=0, context="search_cspm_assets with tag filter")
+        else:
+            assert isinstance(result, dict), "Expected dict or list response for tag filter"
+            assert "results" in result or "total" in result, "Empty response dict should have results/total keys"
 
     def test_search_cspm_assets_with_sort(self):
         """Test search_cspm_assets with sort parameter."""
@@ -210,4 +226,302 @@ class TestCloudIntegration(BaseIntegrationTest):
         # If we got >100 results, batching was tested successfully
         if len(result) > 100:
             print(f"✅ Batching tested successfully with {len(result)} assets")
+
+    # --- IOM Findings Integration Tests ---
+
+    def test_search_iom_findings_returns_details(self):
+        """Test that search_iom_findings returns full IOM entity details.
+
+        Validates:
+        - cspm_evaluations_iom_queries operation name is correct
+        - cspm_evaluations_iom_entities operation name is correct
+        - Two-step pattern returns full details, not just IDs
+        """
+        result = self.call_method(self.module.search_iom_findings, limit=5)
+
+        self.assert_no_error(result, context="search_iom_findings")
+        self.assert_valid_list_response(result, min_length=0, context="search_iom_findings")
+
+        if len(result) > 0:
+            self.assert_search_returns_details(
+                result,
+                expected_fields=["id", "cid", "cloud", "evaluation", "resource"],
+                context="search_iom_findings full details",
+            )
+
+    def test_search_iom_findings_with_severity_filter(self):
+        """Test search_iom_findings with severity FQL filter."""
+        result = self.call_method(
+            self.module.search_iom_findings,
+            filter="severity:'critical'",
+            limit=3,
+        )
+
+        # May return list of results or FQL guide dict if no critical findings exist
+        if isinstance(result, list):
+            self.assert_valid_list_response(
+                result, min_length=0, context="search_iom_findings with severity filter"
+            )
+        else:
+            # FQL guide response on empty results is valid
+            assert isinstance(result, dict), "Expected dict or list response"
+
+    def test_search_iom_findings_with_cloud_provider_filter(self):
+        """Test search_iom_findings filtering by cloud provider."""
+        result = self.call_method(
+            self.module.search_iom_findings,
+            filter="cloud_provider:'aws'",
+            limit=3,
+        )
+
+        self.assert_no_error(result, context="search_iom_findings with cloud_provider filter")
+        self.assert_valid_list_response(
+            result, min_length=0, context="search_iom_findings cloud_provider filter"
+        )
+
+    def test_search_iom_findings_with_sort(self):
+        """Test search_iom_findings with sort parameter."""
+        result = self.call_method(
+            self.module.search_iom_findings,
+            sort="severity|desc",
+            limit=3,
+        )
+
+        self.assert_no_error(result, context="search_iom_findings with sort")
+        self.assert_valid_list_response(result, min_length=0, context="search_iom_findings with sort")
+
+    def test_search_iom_findings_batching(self):
+        """Test search_iom_findings with larger limit to verify batching."""
+        result = self.call_method(self.module.search_iom_findings, limit=200)
+
+        self.assert_no_error(result, context="search_iom_findings batching")
+        self.assert_valid_list_response(result, min_length=0, context="search_iom_findings batching")
+
+        if len(result) > 100:
+            print(f"✅ IOM batching tested successfully with {len(result)} findings")
+
+    # --- Suppression Rules Integration Tests ---
+
+    def test_search_suppression_rules(self):
+        """Test search_cspm_suppression_rules returns rule details.
+
+        Validates the override endpoint pattern works correctly.
+        May return empty if no suppression rules exist in the environment.
+        """
+        result = self.call_method(self.module.search_cspm_suppression_rules, limit=5)
+
+        self.assert_no_error(result, context="search_cspm_suppression_rules")
+        self.assert_valid_list_response(result, min_length=0, context="search_cspm_suppression_rules")
+
+        if len(result) > 0:
+            first_rule = result[0]
+            assert isinstance(first_rule, dict), "Expected dict items for suppression rules"
+            print(f"✅ Found {len(result)} suppression rule(s). Fields: {list(first_rule.keys())}")
+
+    def test_create_and_delete_suppression_rule_roundtrip(self):
+        """Test creating and deleting a suppression rule (full roundtrip).
+
+        Creates a narrowly-scoped suppression rule with a short expiration,
+        verifies it was created, then deletes it to clean up.
+        """
+        # Create a narrowly-scoped test rule with unique name
+        rule_name = f"falcon-mcp-test-{int(time.time())}"
+        create_result = self.call_method(
+            self.module.create_cspm_suppression_rule,
+            name=rule_name,
+            suppression_reason="false-positive",
+            rule_names=["integration-test-nonexistent-rule"],
+            rule_ids=None,
+            rule_severities=None,
+            cloud_providers=["aws"],
+            account_ids=None,
+            regions=["us-east-1"],
+            resource_ids=None,
+            resource_types=None,
+            expiration_date="2027-01-01T00:00:00Z",
+        )
+
+        self.assert_no_error(create_result, context="create_cspm_suppression_rule")
+
+        # Extract the created rule ID for cleanup
+        # API returns IDs as strings in a list: ["uuid-here"]
+        rule_id = None
+        if isinstance(create_result, list) and len(create_result) > 0:
+            first = create_result[0]
+            if isinstance(first, str):
+                rule_id = first
+            elif isinstance(first, dict):
+                rule_id = first.get("id")
+            print(f"✅ Created suppression rule: {rule_id}")
+        elif isinstance(create_result, dict) and "id" in create_result:
+            rule_id = create_result["id"]
+            print(f"✅ Created suppression rule: {rule_id}")
+
+        # Clean up: delete the rule we just created
+        if rule_id:
+            delete_result = self.call_method(
+                self.module.delete_cspm_suppression_rules,
+                ids=[rule_id],
+            )
+            self.assert_no_error(delete_result, context="delete_cspm_suppression_rules")
+            print(f"✅ Deleted suppression rule: {rule_id}")
+        else:
+            print("⚠️  Could not extract rule ID from create response, skipping delete")
+
+
+@pytest.mark.integration
+class TestCloudRisksIntegration(BaseIntegrationTest):
+    """Integration tests for cloud risks and cloud groups tools.
+
+    Validates correct operation names, combined endpoint response shape,
+    and that the API returns data we can assert on.
+    """
+
+    @pytest.fixture(autouse=True)
+    def setup_module(self, falcon_client):
+        self.module = CloudModule(falcon_client)
+
+    def test_search_cloud_risks_operation_name_correct(self):
+        """Validate combined_cloud_risks operation name is correct (not a typo)."""
+        result = self.call_method(self.module.search_cloud_risks, limit=1)
+        self.assert_no_error(result, context="combined_cloud_risks operation name")
+        self.assert_valid_list_response(result, min_length=0, context="search_cloud_risks")
+
+    def test_search_cloud_risks_returns_full_details(self):
+        """Test that search_cloud_risks returns full entity details, not IDs."""
+        result = self.call_method(self.module.search_cloud_risks, limit=3)
+        self.assert_no_error(result, context="search_cloud_risks full details")
+        if not result:
+            self.skip_with_warning("No cloud risks found in environment", "search_cloud_risks details")
+            return
+        first = result[0]
+        assert isinstance(first, dict), f"Expected dict, got {type(first)}"
+        print(f"\nCloud risk entity keys: {sorted(first.keys())}")
+        for field in ["id", "severity", "status"]:
+            assert field in first, f"Expected '{field}' in risk entity. Got: {sorted(first.keys())}"
+
+    def test_search_cloud_risks_with_severity_filter(self):
+        """Test severity FQL filter with correct capitalized value."""
+        result = self.call_method(
+            self.module.search_cloud_risks,
+            filter="severity:'Critical'",
+            limit=3,
+        )
+        self.assert_no_error(result, context="search_cloud_risks severity filter")
+        self.assert_valid_list_response(result, min_length=0, context="severity filter")
+
+    def test_search_cloud_risks_with_status_filter(self):
+        """Test status FQL filter with correct capitalized value."""
+        result = self.call_method(
+            self.module.search_cloud_risks,
+            filter="status:'Open'",
+            limit=3,
+        )
+        self.assert_no_error(result, context="search_cloud_risks status filter")
+        self.assert_valid_list_response(result, min_length=0, context="status filter")
+
+    def test_search_cloud_risks_capitalized_filter_values_return_results(self):
+        """Regression: capitalized severity/status values must match when risks exist.
+
+        Lowercase values (severity:'critical', status:'open') silently return 0
+        on this endpoint. This test catches that regression by asserting non-empty
+        results whenever the environment has any cloud risks at all.
+        """
+        baseline = self.call_method(self.module.search_cloud_risks, limit=1)
+        self.assert_no_error(baseline, context="baseline cloud risks")
+        if not baseline:
+            self.skip_with_warning("No cloud risks in environment, skipping case-sensitivity regression test", "cloud risks case")
+            return
+
+        result = self.call_method(
+            self.module.search_cloud_risks,
+            filter="severity:'Critical',severity:'High',severity:'Medium',severity:'Low',severity:'Informational'",
+            limit=5,
+        )
+        self.assert_no_error(result, context="capitalized severity filter")
+        self.assert_valid_list_response(result, min_length=1, context="capitalized severity values must match when risks exist")
+
+    def test_search_cloud_risks_with_cloud_provider_filter(self):
+        """Test cloud_provider FQL filter (validates operator support)."""
+        result = self.call_method(
+            self.module.search_cloud_risks,
+            filter="cloud_provider:'aws'",
+            limit=3,
+        )
+        self.assert_no_error(result, context="search_cloud_risks cloud_provider filter")
+        self.assert_valid_list_response(result, min_length=0, context="cloud_provider filter")
+
+    def test_search_cloud_risks_with_sort(self):
+        """Test sort parameter is accepted by the API."""
+        result = self.call_method(
+            self.module.search_cloud_risks,
+            sort="severity|desc",
+            limit=3,
+        )
+        self.assert_no_error(result, context="search_cloud_risks with sort")
+        self.assert_valid_list_response(result, min_length=0, context="sort")
+
+    @staticmethod
+    def _is_403_error(result: Any) -> bool:
+        """Return True if result signals a 403 / scope-not-permitted error."""
+        if isinstance(result, dict) and "error" in result:
+            error_msg = str(result)
+            if (
+                "403" in error_msg
+                or "access denied" in error_msg.lower()
+                or "forbidden" in error_msg.lower()
+                or "scope not permitted" in error_msg.lower()
+            ):
+                return True
+        if isinstance(result, list) and result and isinstance(result[0], dict) and "error" in result[0]:
+            error_msg = str(result[0])
+            if (
+                "403" in error_msg
+                or "access denied" in error_msg.lower()
+                or "forbidden" in error_msg.lower()
+                or "scope not permitted" in error_msg.lower()
+            ):
+                return True
+        return False
+
+    def test_search_cloud_groups_operation_name_correct(self):
+        """Validate ListCloudGroupsExternal operation name is correct."""
+        result = self.call_method(self.module.search_cloud_groups, limit=5)
+        if self._is_403_error(result):
+            self.skip_with_warning("Cloud groups scope not available on this key", "search_cloud_groups")
+            return
+        self.assert_no_error(result, context="ListCloudGroupsExternal operation name")
+        self.assert_valid_list_response(result, min_length=0, context="search_cloud_groups")
+
+    def test_search_cloud_groups_returns_full_details(self):
+        """Test that search_cloud_groups returns full group entities."""
+        result = self.call_method(self.module.search_cloud_groups, limit=3)
+        if self._is_403_error(result):
+            self.skip_with_warning("Cloud groups scope not available on this key", "search_cloud_groups details")
+            return
+        self.assert_no_error(result, context="search_cloud_groups full details")
+        if not result:
+            self.skip_with_warning("No cloud groups found in environment", "search_cloud_groups details")
+            return
+        first = result[0]
+        assert isinstance(first, dict), f"Expected dict, got {type(first)}"
+        print(f"\nCloud group entity keys: {sorted(first.keys())}")
+        assert "id" in first, f"Expected 'id' in group entity. Got: {sorted(first.keys())}"
+
+    def test_get_cloud_groups_operation_name_correct(self):
+        """Validate ListCloudGroupsByIDExternal operation name is correct."""
+        groups = self.call_method(self.module.search_cloud_groups, limit=1)
+        if self._is_403_error(groups):
+            self.skip_with_warning("Cloud groups scope not available on this key", "get_cloud_groups by ID")
+            return
+        self.assert_no_error(groups, context="get groups for ID lookup")
+        if not groups:
+            self.skip_with_warning("No cloud groups found", "get_cloud_groups by ID")
+            return
+        group_id = groups[0].get("id")
+        assert group_id, "Expected 'id' field in group"
+        result = self.call_method(self.module.get_cloud_groups, ids=[group_id])
+        self.assert_no_error(result, context="ListCloudGroupsByIDExternal operation name")
+        self.assert_valid_list_response(result, min_length=1, context="get_cloud_groups by ID")
+        assert result[0]["id"] == group_id
 

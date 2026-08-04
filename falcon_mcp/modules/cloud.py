@@ -10,6 +10,7 @@ from typing import Any
 
 from mcp.server import FastMCP
 from mcp.server.fastmcp.resources import TextResource
+from mcp.types import ToolAnnotations
 from pydantic import AnyUrl, Field
 
 from falcon_mcp.common.errors import handle_api_response
@@ -17,6 +18,8 @@ from falcon_mcp.common.logging import get_logger
 from falcon_mcp.common.utils import prepare_api_parameters
 from falcon_mcp.modules.base import BaseModule
 from falcon_mcp.resources.cloud import (
+    CLOUD_RISKS_FQL_DOCUMENTATION,
+    CSPM_IOM_FINDINGS_FQL_DOCUMENTATION,
     IMAGES_VULNERABILITIES_FQL_DOCUMENTATION,
     KUBERNETES_CONTAINERS_FQL_DOCUMENTATION,
     SEARCH_CSPM_ASSETS_FQL_DOCUMENTATION,
@@ -60,6 +63,60 @@ class CloudModule(BaseModule):
             name="search_cspm_assets",
         )
 
+        self._add_tool(
+            server=server,
+            method=self.search_iom_findings,
+            name="search_iom_findings",
+        )
+
+        self._add_tool(
+            server=server,
+            method=self.search_cspm_suppression_rules,
+            name="search_cspm_suppression_rules",
+        )
+
+        self._add_tool(
+            server=server,
+            method=self.create_cspm_suppression_rule,
+            name="create_cspm_suppression_rule",
+            annotations=ToolAnnotations(
+                readOnlyHint=False,
+                destructiveHint=True,
+                idempotentHint=False,
+                openWorldHint=True,
+            ),
+        )
+
+        self._add_tool(
+            server=server,
+            method=self.delete_cspm_suppression_rules,
+            name="delete_cspm_suppression_rules",
+            annotations=ToolAnnotations(
+                readOnlyHint=False,
+                destructiveHint=True,
+                idempotentHint=True,
+                openWorldHint=True,
+            ),
+        )
+
+        self._add_tool(
+            server=server,
+            method=self.search_cloud_risks,
+            name="search_cloud_risks",
+        )
+
+        self._add_tool(
+            server=server,
+            method=self.search_cloud_groups,
+            name="search_cloud_groups",
+        )
+
+        self._add_tool(
+            server=server,
+            method=self.get_cloud_groups,
+            name="get_cloud_groups",
+        )
+
     def register_resources(self, server: FastMCP) -> None:
         """Register resources with the MCP server.
         Args:
@@ -68,15 +125,39 @@ class CloudModule(BaseModule):
         kubernetes_containers_fql_resource = TextResource(
             uri=AnyUrl("falcon://cloud/kubernetes-containers/fql-guide"),
             name="falcon_kubernetes_containers_fql_filter_guide",
-            description="Contains the guide for the `filter` param of the `falcon_search_kubernetes_containers` and `falcon_count_kubernetes_containers` tools.",
+            description=(
+                "Contains the guide for the `filter` param of the "
+                "`falcon_search_kubernetes_containers` and `falcon_count_kubernetes_containers` "
+                "tools."
+            ),
             text=KUBERNETES_CONTAINERS_FQL_DOCUMENTATION,
         )
 
         images_vulnerabilities_fql_resource = TextResource(
             uri=AnyUrl("falcon://cloud/images-vulnerabilities/fql-guide"),
             name="falcon_images_vulnerabilities_fql_filter_guide",
-            description="Contains the guide for the `filter` param of the `falcon_search_images_vulnerabilities` tool.",
+            description=(
+                "Contains the guide for the `filter` param of the "
+                "`falcon_search_images_vulnerabilities` tool."
+            ),
             text=IMAGES_VULNERABILITIES_FQL_DOCUMENTATION,
+        )
+
+        cspm_assets_fql_resource = TextResource(
+            uri=AnyUrl("falcon://cloud/cspm-assets/fql-guide"),
+            name="falcon_search_cspm_assets_fql_guide",
+            description=(
+                "Contains the guide for the `filter` param of the "
+                "`falcon_search_cspm_assets` tool."
+            ),
+            text=SEARCH_CSPM_ASSETS_FQL_DOCUMENTATION,
+        )
+
+        cspm_iom_findings_fql_resource = TextResource(
+            uri=AnyUrl("falcon://cloud/cspm-iom-findings/fql-guide"),
+            name="falcon_search_iom_findings_fql_guide",
+            description="Contains the guide for the `filter` param of the `falcon_search_iom_findings` tool.",
+            text=CSPM_IOM_FINDINGS_FQL_DOCUMENTATION,
         )
 
         self._add_resource(
@@ -88,23 +169,29 @@ class CloudModule(BaseModule):
             images_vulnerabilities_fql_resource,
         )
 
-        cspm_assets_fql_resource = TextResource(
-            uri=AnyUrl("falcon://cloud/cspm-assets/fql-guide"),
-            name="falcon_search_cspm_assets_fql_guide",
-            description="Contains the guide for the `filter` param of the `falcon_search_cspm_assets` tool.",
-            text=SEARCH_CSPM_ASSETS_FQL_DOCUMENTATION,
-        )
-
         self._add_resource(
             server,
             cspm_assets_fql_resource,
         )
 
+        self._add_resource(
+            server,
+            cspm_iom_findings_fql_resource,
+        )
+
+        cloud_risks_fql_resource = TextResource(
+            uri=AnyUrl("falcon://cloud/cloud-risks/fql-guide"),
+            name="falcon_search_cloud_risks_fql_guide",
+            description="Contains the guide for the `filter` param of the `falcon_search_cloud_risks` tool.",
+            text=CLOUD_RISKS_FQL_DOCUMENTATION,
+        )
+        self._add_resource(server, cloud_risks_fql_resource)
+
     def search_kubernetes_containers(
         self,
         filter: str | None = Field(
             default=None,
-            description="FQL Syntax formatted string used to limit the results. IMPORTANT: use the `falcon://cloud/kubernetes-containers/fql-guide` resource when building this filter parameter.",
+            description="FQL filter expression. See `falcon://cloud/kubernetes-containers/fql-guide` for syntax.",
             examples={"cloud:'AWS'", "cluster_name:'prod'"},
         ),
         limit: int = Field(
@@ -142,14 +229,15 @@ class CloudModule(BaseModule):
             ).strip(),
             examples={"container_name.desc", "last_seen.desc"},
         ),
-    ) -> list[dict[str, Any]]:
-        """Search for kubernetes containers in your CrowdStrike Kubernetes & Containers Inventory
+    ) -> list[dict[str, Any]] | dict[str, Any]:
+        """Search for Kubernetes containers in your CrowdStrike container inventory.
 
-        IMPORTANT: You must use the `falcon://cloud/kubernetes-containers/fql-guide` resource when you need to use the `filter` parameter.
-        This resource contains the guide on how to build the FQL `filter` parameter for `falcon_search_kubernetes_containers` tool.
+        Use this to find containers by cluster, namespace, image, or cloud provider.
+        Consult falcon://cloud/kubernetes-containers/fql-guide before constructing filter
+        expressions. Returns full container details including image, status, and vulnerabilities.
         """
 
-        return self._base_search_api_call(
+        results, pagination = self._base_search_with_meta(
             operation="ReadContainerCombined",
             search_params={
                 "filter": filter,
@@ -159,19 +247,23 @@ class CloudModule(BaseModule):
             },
             error_message="Failed to search Kubernetes containers",
         )
+        if self._is_error(results):
+            return [results]
+        return self._build_pagination_envelope(results or [], pagination, filter)
 
     def count_kubernetes_containers(
         self,
         filter: str | None = Field(
             default=None,
-            description="FQL Syntax formatted string used to limit the results. IMPORTANT: use the `falcon://cloud/kubernetes-containers/fql-guide` resource when building this filter parameter.",
+            description="FQL filter expression. See `falcon://cloud/kubernetes-containers/fql-guide` for syntax.",
             examples={"cloud:'Azure'", "container_name:'service'"},
         ),
     ) -> int:
-        """Count kubernetes containers in your CrowdStrike Kubernetes & Containers Inventory
+        """Count Kubernetes containers matching filter criteria.
 
-        IMPORTANT: You must use the `falcon://cloud/kubernetes-containers/fql-guide` resource when you need to use the `filter` parameter.
-        This resource contains the guide on how to build the FQL `filter` parameter for `falcon_count_kubernetes_containers` tool.
+        Use this for aggregate counts without returning full container details. Consult
+        falcon://cloud/kubernetes-containers/fql-guide before constructing filter
+        expressions. Returns the matching container count as an integer.
         """
 
         # Prepare parameters
@@ -187,26 +279,23 @@ class CloudModule(BaseModule):
         # Make the API request
         response = self.client.command(operation, parameters=params)
 
-        # Handle the response — the ReadContainerCount endpoint returns a list
-        # with a single dict like [{"count": <int>}], not a bare int. Unwrap it
-        # so the function honors its `-> int` return annotation; otherwise
-        # Pydantic's output validator rejects the response with
-        # "Input should be a valid integer".
+        # Handle the response
         result = handle_api_response(
             response,
             operation=operation,
-            error_message="Failed to perform operation",
-            default_result=[{"count": 0}],
+            error_message="Failed to count Kubernetes containers",
+            default_result=0,
         )
-        if isinstance(result, list) and result and isinstance(result[0], dict) and "count" in result[0]:
-            return int(result[0]["count"])
-        return 0
+
+        if isinstance(result, list) and result and isinstance(result[0], dict):
+            return result[0].get("count") or 0
+        return result
 
     def search_images_vulnerabilities(
         self,
         filter: str | None = Field(
             default=None,
-            description="FQL Syntax formatted string used to limit the results. IMPORTANT: use the `falcon://cloud/images-vulnerabilities/fql-guide` resource when building this filter parameter.",
+            description="FQL filter expression. See `falcon://cloud/images-vulnerabilities/fql-guide` for syntax.",
             examples={"cve_id:*'*2025*'", "cvss_score:>5"},
         ),
         limit: int = Field(
@@ -238,53 +327,44 @@ class CloudModule(BaseModule):
             ).strip(),
             examples={"cvss_score.desc", "cps_current_rating.asc"},
         ),
-    ) -> list[dict[str, Any]]:
-        """Search for images vulnerabilities in your CrowdStrike Image Assessments
+    ) -> list[dict[str, Any]] | dict[str, Any]:
+        """Search for container image vulnerabilities in CrowdStrike Image Assessments.
 
-        IMPORTANT: You must use the `falcon://cloud/images-vulnerabilities/fql-guide` resource when you need to use the `filter` parameter.
-        This resource contains the guide on how to build the FQL `filter` parameter for `falcon_search_images_vulnerabilities` tool.
+        Use this to find CVEs affecting container images by severity, CVSS score, or
+        CVE ID. Consult falcon://cloud/images-vulnerabilities/fql-guide before constructing
+        filter expressions. Returns vulnerability details including CVE IDs, scores, and
+        impacted image counts.
+        Responses include `pagination.total` (the total number of records matching the filter, or null when the API does not report a count) — use it to answer "how many" questions.
         """
 
-        # Prepare parameters
-        params = prepare_api_parameters(
-            {
+        result, pagination = self._base_search_with_meta(
+            operation="ReadCombinedVulnerabilities",
+            search_params={
                 "filter": filter,
                 "limit": limit,
                 "offset": offset,
                 "sort": sort,
-            }
-        )
-
-        # Define the operation name
-        operation = "ReadCombinedVulnerabilities"
-
-        # Make the API request
-        response = self.client.command(operation, parameters=params)
-
-        # Handle the response
-        return handle_api_response(
-            response,
-            operation=operation,
+            },
             error_message="Failed to perform operation",
-            default_result=[],
         )
+
+        if self._is_error(result):
+            return [result]
+
+        return self._build_pagination_envelope(result, pagination, filter)
 
     def search_cspm_assets(
         self,
         filter: str | None = Field(
             default=None,
-            description="FQL Syntax formatted string used to limit the results. IMPORTANT: use the `falcon://cloud/cspm-assets/fql-guide` resource when building this filter parameter.",
+            description="FQL filter expression. See `falcon://cloud/cspm-assets/fql-guide` for syntax.",
             examples=["cloud_provider:'AWS'", "tag_key:'Environment'+tag_value:'Production'"],
         ),
         limit: int = Field(
             default=100,
             ge=1,
             le=1000,
-            description="The maximum number of assets to return in this response (default: 100; max: 1000). Use with the offset or after parameter to manage pagination of results.",
-        ),
-        offset: int | None = Field(
-            default=None,
-            description="Starting index of overall result set from which to return assets.",
+            description="The maximum number of assets to return in this response (default: 100; max: 1000). Use with the after parameter to manage pagination of results.",
         ),
         after: str | None = Field(
             default=None,
@@ -313,28 +393,20 @@ class CloudModule(BaseModule):
             examples=["updated_at.desc", "resource_type.asc"],
         ),
     ) -> list[dict[str, Any]] | dict[str, Any]:
-        """Search for cloud assets in your CrowdStrike CSPM Asset Inventory.
+        """Search for cloud assets in your CrowdStrike CSPM inventory.
 
-        This tool queries cloud resources (EC2 instances, VPCs, subnets, load balancers, etc.)
-        managed by CrowdStrike CSPM. Supports comprehensive FQL filtering including:
-        - Cloud provider and resource type filtering
-        - Tag-based filtering (AWS/Azure/GCP tags)
-        - Security posture (publicly exposed, severity, IOM/IOA counts)
-        - Compliance status and benchmarks
-        - Temporal filtering (creation time, last updated)
-
-        IMPORTANT: You must use the `falcon://cloud/cspm-assets/fql-guide` resource when you need to use the `filter` parameter.
-        This resource contains the guide on how to build the FQL `filter` parameter for `falcon_search_cspm_assets` tool.
-
-        Returns FQL syntax guide on error or empty results to help refine queries.
+        Use this to find cloud resources (EC2, VPCs, S3, etc.) by provider, region,
+        resource type, or tags. Consult falcon://cloud/cspm-assets/fql-guide before
+        constructing filter expressions. Returns slimmed asset details with security
+        posture context (IOM/IOA counts, exposure, severity).
+        Responses include `pagination.total` (the total number of records matching the filter, or null when the API does not report a count) — use it to answer "how many" questions. For cursor-based paging, use `pagination.next` as the `after` parameter on the next call.
         """
         # Step 1: Query for asset IDs
-        asset_ids = self._base_search_api_call(
+        asset_ids, pagination = self._base_search_with_meta(
             operation="cloud_security_assets_queries",
             search_params={
                 "filter": filter,
                 "limit": limit,
-                "offset": offset,
                 "after": after,
                 "sort": sort,
             },
@@ -349,13 +421,9 @@ class CloudModule(BaseModule):
                 SEARCH_CSPM_ASSETS_FQL_DOCUMENTATION,
             )
 
-        # Handle empty results - return with FQL guide
+        # Handle empty results
         if not asset_ids:
-            return self._format_fql_error_response(
-                [],
-                filter,
-                SEARCH_CSPM_ASSETS_FQL_DOCUMENTATION,
-            )
+            return self._build_pagination_envelope([], pagination, filter)
 
         # Step 2: Batch fetch full details (API limit: 100 IDs per request)
         details = self._batch_get_cspm_assets(asset_ids)
@@ -363,7 +431,13 @@ class CloudModule(BaseModule):
         if self._is_error(details):
             return [details]
 
-        return details
+        # Restore the query-step sort order before slimming, in case the entities
+        # endpoint reorders results.
+        details = self._reorder_by_ids(asset_ids, details, id_field="id")
+
+        return self._build_pagination_envelope(
+            [self._slim_cspm_asset(asset) for asset in details], pagination, filter
+        )
 
     def _batch_get_cspm_assets(self, asset_ids: list[str]) -> list[dict[str, Any]] | dict[str, Any]:
         """Fetch CSPM asset details in batches of 100 (API limit).
@@ -399,3 +473,581 @@ class CloudModule(BaseModule):
                 all_assets.extend(result)
 
         return all_assets
+
+    def _slim_cspm_asset(self, asset: dict[str, Any]) -> dict[str, Any]:
+        """Strip bloated fields from a CSPM asset record to reduce response size.
+
+        Raw CSPM asset records can be 100+ KB each due to compliance benchmark
+        details and raw configuration blobs. This keeps actionable fields and
+        security posture data while dropping internal/verbose data.
+        """
+        KEEP_TOP_LEVEL = {
+            "id",
+            "arn",
+            "resource_id",
+            "resource_name",
+            "resource_type",
+            "resource_type_name",
+            "account_id",
+            "account_name",
+            "region",
+            "zone",
+            "cloud_provider",
+            "service",
+            "service_category",
+            "active",
+            "first_seen",
+            "updated_at",
+            "creation_time",
+            "tags",
+            "resource_url",
+            "relationships",
+        }
+
+        slimmed = {k: v for k, v in asset.items() if k in KEEP_TOP_LEVEL}
+
+        cloud_context = asset.get("cloud_context")
+        if isinstance(cloud_context, dict):
+            slimmed["cloud_context"] = self._slim_cloud_context(cloud_context)
+
+        return slimmed
+
+    def _slim_cloud_context(self, ctx: dict[str, Any]) -> dict[str, Any]:
+        """Keep security-relevant summary from cloud_context, strip benchmark bloat."""
+        slimmed: dict[str, Any] = {}
+
+        # Scalar fields worth keeping
+        for key in (
+            "cspm_license",
+            "publicly_exposed",
+            "managed_by",
+            "has_tags",
+            "instance_id",
+            "instance_state",
+            "open_cloud_risks",
+            "scan_type",
+            "data_classifications",
+        ):
+            if key in ctx:
+                slimmed[key] = ctx[key]
+
+        # Host info (platform, OS, state) — small and useful
+        if "host" in ctx:
+            slimmed["host"] = ctx["host"]
+
+        # Detections — keep counts/severity, strip rule IDs and benchmark objects
+        detections = ctx.get("detections")
+        if isinstance(detections, dict):
+            slimmed["detections"] = {
+                k: detections[k]
+                for k in (
+                    "iom_counts",
+                    "ioa_counts",
+                    "severities",
+                    "highest_severity",
+                    "resource_url",
+                )
+                if k in detections
+            }
+
+        # Insights — keep external boolean flags, drop verbose details
+        insights = ctx.get("insights")
+        if isinstance(insights, dict):
+            external = insights.get("external")
+            if external:
+                slimmed["insights"] = {"external": external}
+
+        return slimmed
+
+    def search_iom_findings(
+        self,
+        filter: str | None = Field(
+            default=None,
+            description=(
+                "FQL filter expression."
+                " See `falcon://cloud/cspm-iom-findings/fql-guide` for syntax."
+            ),
+            examples=["severity:'critical'+status:'open'", "cloud_provider:'aws'+service:'S3'"],
+        ),
+        limit: int = Field(
+            default=100,
+            ge=1,
+            le=1000,
+            description=(
+                "The maximum number of IOM findings to return (default: 100; max: 1000)."
+                " Use with the offset parameter to manage pagination."
+            ),
+        ),
+        offset: int | None = Field(
+            default=None,
+            description="Starting index of overall result set from which to return findings.",
+        ),
+        sort: str | None = Field(
+            default=None,
+            description=dedent(
+                """
+                Sort IOM findings. Use |asc or |desc suffix to specify direction.
+
+                Common sort fields:
+                severity: Finding severity level
+                first_detected: When the finding was first detected
+                last_detected: When the finding was last seen
+                cloud_provider: Cloud provider name
+                service: Cloud service name
+                status: Finding status
+
+                Examples: 'severity|desc', 'last_detected|desc', 'first_detected|asc'
+            """
+            ).strip(),
+            examples=["severity|desc", "last_detected|desc"],
+        ),
+    ) -> list[dict[str, Any]] | dict[str, Any]:
+        """Search for CSPM Indicators of Misconfiguration (IOM) findings.
+
+        Use this to find specific compliance rule failures on individual cloud resources —
+        each IOM is a single rule-against-resource violation (e.g. "S3 bucket ACL allows
+        public write" on a named bucket). For aggregated risk posture combining multiple
+        IOMs and IOAs across assets, use falcon_search_cloud_risks instead. For runtime
+        behavioral threats, use falcon_search_detections. Consult
+        falcon://cloud/cspm-iom-findings/fql-guide before constructing filter expressions.
+        Returns IOM entities with cloud context, evaluation details, and resource information.
+        Responses include `pagination.total` (the total number of records matching the filter, or null when the API does not report a count) — use it to answer "how many" questions.
+        """
+        # Step 1: Query for IOM IDs
+        iom_ids, pagination = self._base_search_with_meta(
+            operation="cspm_evaluations_iom_queries",
+            search_params={
+                "filter": filter,
+                "limit": limit,
+                "offset": offset,
+                "sort": sort,
+            },
+            error_message="Failed to query IOM findings",
+        )
+
+        # Handle search error - return with FQL guide
+        if self._is_error(iom_ids):
+            return self._format_fql_error_response(
+                [iom_ids],
+                filter,
+                CSPM_IOM_FINDINGS_FQL_DOCUMENTATION,
+            )
+
+        # Handle empty results
+        if not iom_ids:
+            return self._build_pagination_envelope([], pagination, filter)
+
+        # Step 2: Fetch full IOM entity details (GET with query params, max 100 per call)
+        details = self._batch_get_iom_entities(iom_ids)
+
+        if self._is_error(details):
+            return [details]
+
+        # Restore the query-step sort order in case the entities endpoint reorders results.
+        details = self._reorder_by_ids(iom_ids, details, id_field="id")
+        return self._build_pagination_envelope(details, pagination, filter)
+
+    def search_cloud_risks(
+        self,
+        filter: str | None = Field(
+            default=None,
+            description="FQL filter expression. See `falcon://cloud/cloud-risks/fql-guide` for syntax.",
+            examples=["severity:'Critical'+status:'Open'", "cloud_provider:'aws'+groups.environment:'production'"],
+        ),
+        limit: int = Field(
+            default=100,
+            ge=1,
+            le=1000,
+            description="Maximum number of risks to return (default: 100; max: 1000). Use with offset for pagination.",
+        ),
+        offset: int | None = Field(
+            default=None,
+            description="Starting index of overall result set from which to return results.",
+        ),
+        sort: str | None = Field(
+            default=None,
+            description=(
+                "Sort risks using field|asc or field|desc syntax.\n\n"
+                "Supported fields: account_id, account_name, asset_id, asset_name, "
+                "asset_region, asset_type, cloud_provider, first_seen, last_seen, "
+                "resolved_at, rule_name, service_category, severity, status\n\n"
+                "Examples: 'severity|desc', 'first_seen|desc', 'account_name|asc'"
+            ),
+            examples=["severity|desc", "first_seen|desc", "account_name|asc"],
+        ),
+    ) -> list[dict[str, Any]] | dict[str, Any]:
+        """Search for cloud risks in your CrowdStrike environment.
+
+        Use this to find risks by severity, status, cloud provider, account, asset, rule,
+        or threat actor. Cloud risks aggregate IOM and IOA findings into per-asset risk
+        records and include threat intelligence attribution. For individual compliance rule
+        violations on specific resources, use falcon_search_iom_findings instead. Consult
+        falcon://cloud/cloud-risks/fql-guide before constructing filter expressions.
+        Returns full risk details including severity, lifecycle status, asset context, and
+        threat intelligence attribution.
+        Responses include `pagination.total` (the total number of records matching the filter, or null when the API does not report a count) — use it to answer "how many" questions.
+        """
+        results, pagination = self._base_search_with_meta(
+            operation="combined_cloud_risks",
+            search_params={
+                "filter": filter,
+                "limit": limit,
+                "offset": offset,
+                "sort": sort,
+            },
+            error_message="Failed to search cloud risks",
+        )
+
+        if self._is_error(results):
+            return [results]
+
+        return self._build_pagination_envelope(results, pagination, filter)
+
+    def search_cloud_groups(
+        self,
+        filter: str | None = Field(
+            default=None,
+            description=(
+                "FQL filter expression. Supports group properties: name, description, "
+                "created_at, updated_at. Selector properties: cloud_provider, account_id, "
+                "region. Group tags: business_unit, business_impact, environment.\n\n"
+                "Examples: \"name:'prod-group'\", \"environment:'production'\""
+            ),
+        ),
+        limit: int = Field(
+            default=100,
+            ge=1,
+            le=500,
+            description="Maximum number of cloud groups to return (default: 100).",
+        ),
+        offset: int | None = Field(
+            default=None,
+            description="Starting index of overall result set from which to return results.",
+        ),
+        sort: str | None = Field(
+            default=None,
+            description="Sort groups. Default: name|asc. Examples: 'name|asc', 'created_at|desc'",
+            examples=["name|asc", "created_at|desc"],
+        ),
+    ) -> list[dict[str, Any]] | dict[str, Any]:
+        """List cloud groups in your CrowdStrike environment.
+
+        Use this to discover available cloud groups before filtering risks by
+        `cloud_group` or `groups.*` FQL fields in `falcon_search_cloud_risks`.
+        Returns full group details including name, selectors, and tags.
+        """
+        results, pagination = self._base_search_with_meta(
+            operation="ListCloudGroupsExternal",
+            search_params={
+                "filter": filter,
+                "limit": limit,
+                "offset": offset,
+                "sort": sort,
+            },
+            error_message="Failed to search cloud groups",
+        )
+
+        if self._is_error(results):
+            return [results]
+
+        return self._build_pagination_envelope(results, pagination, filter)
+
+    def get_cloud_groups(
+        self,
+        ids: list[str] = Field(
+            description="One or more cloud group IDs to retrieve. Find IDs with falcon_search_cloud_groups.",
+        ),
+    ) -> list[dict[str, Any]]:
+        """Get detailed information for cloud groups by ID.
+
+        Use when you already have specific cloud group IDs — for example, the `cloud_groups`
+        field returned by `falcon_search_cloud_risks`. Returns full group details including
+        name, selectors, business impact, and environment tags.
+        """
+        params = prepare_api_parameters({"ids": ids})
+        response = self.client.command("ListCloudGroupsByIDExternal", parameters=params)
+        return handle_api_response(
+            response,
+            operation="ListCloudGroupsByIDExternal",
+            error_message="Failed to get cloud groups",
+            default_result=[],
+        )
+
+    def _batch_get_iom_entities(self, iom_ids: list[str]) -> list[dict[str, Any]] | dict[str, Any]:
+        """Fetch IOM entity details in batches of 100 (API limit).
+
+        Args:
+            iom_ids: List of IOM finding IDs to fetch
+
+        Returns:
+            List of IOM entity details or error dict
+        """
+        BATCH_SIZE = 100
+        all_entities: list[dict[str, Any]] = []
+
+        for i in range(0, len(iom_ids), BATCH_SIZE):
+            batch = iom_ids[i : i + BATCH_SIZE]
+            result = self._base_get_by_ids(
+                operation="cspm_evaluations_iom_entities",
+                ids=batch,
+                id_key="ids",
+                use_params=True,
+            )
+
+            if self._is_error(result):
+                return result
+
+            if isinstance(result, list):
+                all_entities.extend(result)
+
+        return all_entities
+
+    def search_cspm_suppression_rules(
+        self,
+        limit: int = Field(
+            default=100,
+            ge=1,
+            le=500,
+            description="Maximum number of suppression rules to return (default: 100; max: 500).",
+        ),
+        offset: int | None = Field(
+            default=None,
+            description="Starting index for pagination.",
+        ),
+    ) -> list[dict[str, Any]] | dict[str, Any]:
+        """Search for CSPM IOM suppression rules.
+
+        Use this to review existing suppressions before creating new ones. Returns
+        suppression rule objects including scope, reason, and expiration details.
+        Returns an empty list if no rules exist.
+        Responses include `pagination.total` (the total number of records matching the filter, or null when the API does not report a count) — use it to answer "how many" questions.
+        """
+        # Step 1: Query suppression rule IDs
+        params = prepare_api_parameters({"limit": limit, "offset": offset})
+        query_response = self.client.command(
+            "QuerySuppressionRules",
+            override="GET,/cloud-policies/queries/suppression-rules/v1",
+            parameters=params,
+        )
+
+        pagination = self._extract_pagination(query_response)
+
+        query_result = handle_api_response(
+            query_response,
+            operation="QuerySuppressionRules",
+            error_message="Failed to query suppression rules",
+            default_result=[],
+        )
+
+        if self._is_error(query_result):
+            return query_result
+
+        if not query_result:
+            return self._build_pagination_envelope([], pagination)
+
+        # Step 2: Fetch suppression rule details
+        detail_params = prepare_api_parameters({"ids": query_result})
+        detail_response = self.client.command(
+            "GetSuppressionRules",
+            override="GET,/cloud-policies/entities/suppression-rules/v1",
+            parameters=detail_params,
+        )
+
+        details = handle_api_response(
+            detail_response,
+            operation="GetSuppressionRules",
+            error_message="Failed to get suppression rule details",
+            default_result=[],
+        )
+
+        if self._is_error(details):
+            return [details]
+
+        # Preserve the query-step order in case the details endpoint reorders results.
+        details = self._reorder_by_ids(query_result, details, id_field="id")
+        return self._build_pagination_envelope(details, pagination)
+
+    def create_cspm_suppression_rule(
+        self,
+        name: str = Field(
+            description="Name for the suppression rule. Should be descriptive.",
+            examples=["Suppress S3 public access for dev accounts"],
+        ),
+        suppression_reason: str = Field(
+            description=(
+                "Reason for suppression. Required."
+                " Values: 'accept-risk', 'compensating-control', 'false-positive'."
+            ),
+            examples=["accept-risk", "compensating-control", "false-positive"],
+        ),
+        rule_ids: list[str] | None = Field(
+            default=None,
+            description=(
+                "Specific rule IDs to suppress."
+                " If not provided, use rule_severities or rule_names to scope."
+            ),
+        ),
+        rule_names: list[str] | None = Field(
+            default=None,
+            description="Rule names to suppress (supports wildcards).",
+        ),
+        rule_severities: list[str] | None = Field(
+            default=None,
+            description=(
+                "Rule severities to suppress."
+                " Values: 'critical', 'high', 'medium', 'low', 'informational'."
+            ),
+        ),
+        cloud_providers: list[str] | None = Field(
+            default=None,
+            description=(
+                "Limit suppression to specific cloud providers. Values: 'aws', 'azure', 'gcp'."
+            ),
+        ),
+        account_ids: list[str] | None = Field(
+            default=None,
+            description="Limit suppression to specific cloud account IDs.",
+        ),
+        regions: list[str] | None = Field(
+            default=None,
+            description=(
+                "Limit suppression to specific cloud regions. Ex: ['us-east-1', 'eu-west-1']."
+            ),
+        ),
+        resource_ids: list[str] | None = Field(
+            default=None,
+            description="Limit suppression to specific resource IDs.",
+        ),
+        resource_types: list[str] | None = Field(
+            default=None,
+            description=("Limit suppression to specific resource types. Ex: ['AWS::S3::Bucket']."),
+        ),
+        expiration_date: str | None = Field(
+            default=None,
+            description=(
+                "Optional expiration date in RFC 3339 format"
+                " (e.g., '2025-12-31T23:59:59Z')."
+                " WARNING: Omitting this creates a PERMANENT suppression."
+            ),
+        ),
+    ) -> list[dict[str, Any]] | dict[str, Any]:
+        """Create a CSPM IOM suppression rule to hide matching findings.
+
+        Suppressed findings are still assessed but not surfaced in compliance scores.
+        Requires at least one rule selection (rule_ids, rule_names, or rule_severities)
+        and a suppression reason. Setting an expiration_date is strongly recommended to
+        avoid permanent suppressions. Returns the created suppression rule object.
+        """
+        valid_reasons = {"accept-risk", "compensating-control", "false-positive"}
+        if suppression_reason not in valid_reasons:
+            return {
+                "error": f"Invalid suppression_reason: '{suppression_reason}'",
+                "details": f"Must be one of: {', '.join(sorted(valid_reasons))}",
+            }
+
+        # Build rule selection filter
+        rule_filter: dict[str, Any] = {}
+        if rule_ids:
+            rule_filter["rule_ids"] = rule_ids
+        if rule_names:
+            rule_filter["rule_names"] = rule_names
+        if rule_severities:
+            rule_filter["rule_severities"] = rule_severities
+        if not rule_filter:
+            return {
+                "error": "At least one rule selection parameter is required",
+                "details": "Provide rule_ids, rule_names, or rule_severities to scope the suppression.",
+            }
+
+        # Build asset scope filter
+        asset_filter: dict[str, Any] = {}
+        if cloud_providers:
+            asset_filter["cloud_providers"] = cloud_providers
+        if account_ids:
+            asset_filter["account_ids"] = account_ids
+        if regions:
+            asset_filter["regions"] = regions
+        if resource_ids:
+            asset_filter["resource_ids"] = resource_ids
+        if resource_types:
+            asset_filter["resource_types"] = resource_types
+
+        # Build the flat suppression rule body
+        body: dict[str, Any] = {
+            "name": name,
+            "domain": "CSPM",
+            "subdomain": "IOM",
+            "suppression_reason": suppression_reason,
+            "rule_selection_type": "rule_selection_filter",
+            "rule_selection_filter": rule_filter,
+            "scope_type": "asset_filter" if asset_filter else "all_assets",
+        }
+
+        if asset_filter:
+            body["scope_asset_filter"] = asset_filter
+
+        if expiration_date:
+            body["suppression_expiration_date"] = expiration_date
+
+        response = self.client.command(
+            "CreateSuppressionRule",
+            override="POST,/cloud-policies/entities/suppression-rules/v1",
+            body=body,
+        )
+
+        create_result = handle_api_response(
+            response,
+            operation="CreateSuppressionRule",
+            error_message="Failed to create suppression rule",
+            default_result=[],
+        )
+
+        if self._is_error(create_result):
+            return create_result
+
+        if not create_result:
+            return []
+
+        # API returns list of created rule IDs — fetch full details
+        detail_params = prepare_api_parameters({"ids": create_result})
+        detail_response = self.client.command(
+            "GetSuppressionRules",
+            override="GET,/cloud-policies/entities/suppression-rules/v1",
+            parameters=detail_params,
+        )
+
+        return handle_api_response(
+            detail_response,
+            operation="GetSuppressionRules",
+            error_message="Failed to get created suppression rule details",
+            default_result=[],
+        )
+
+    def delete_cspm_suppression_rules(
+        self,
+        ids: list[str] = Field(
+            description=(
+                "List of suppression rule IDs to delete."
+                " Use falcon_search_cspm_suppression_rules to find rule IDs."
+            ),
+        ),
+    ) -> list[dict[str, Any]] | dict[str, Any]:
+        """Delete CSPM IOM suppression rules by ID.
+
+        Deleting a suppression rule re-activates all findings that were previously
+        suppressed by it. Use falcon_search_cspm_suppression_rules to find rule IDs
+        first. Returns a confirmation response.
+        """
+        params = prepare_api_parameters({"ids": ids})
+        response = self.client.command(
+            "DeleteSuppressionRules",
+            override="DELETE,/cloud-policies/entities/suppression-rules/v1",
+            parameters=params,
+        )
+
+        return handle_api_response(
+            response,
+            operation="DeleteSuppressionRules",
+            error_message="Failed to delete suppression rules",
+            default_result=[],
+        )

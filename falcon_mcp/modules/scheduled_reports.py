@@ -95,7 +95,7 @@ class ScheduledReportsModule(BaseModule):
         self,
         filter: str | None = Field(
             default=None,
-            description="FQL filter to limit results. Use id:'<id>' to get specific reports. IMPORTANT: use the `falcon://scheduled-reports/search/fql-guide` resource when building this filter parameter.",
+            description="FQL filter expression. See `falcon://scheduled-reports/search/fql-guide` for syntax.",
         ),
         limit: int = Field(
             default=10,
@@ -115,28 +115,15 @@ class ScheduledReportsModule(BaseModule):
             default=None,
             description="Free-text search for terms in id, name, description, type, status fields",
         ),
-    ) -> list[dict[str, Any]]:
+    ) -> list[dict[str, Any]] | dict[str, Any]:
         """Search for scheduled reports and searches in your CrowdStrike environment.
 
-        Returns full details for matching scheduled report/search entities. Use the filter
-        parameter to narrow results or retrieve specific entities by ID.
-
-        IMPORTANT: You must use the `falcon://scheduled-reports/search/fql-guide` resource
-        when you need to use the `filter` parameter.
-
-        Common use cases:
-        - Get specific report by ID: filter=id:'<report-id>'
-        - Get multiple reports by ID: filter=id:['id1','id2']
-        - Find active reports: filter=status:'ACTIVE'
-        - Find scheduled searches: filter=type:'event_search'
-        - Find by creator: filter=user_id:'user@email.com'
-
-        Examples:
-        - filter=status:'ACTIVE'+type:'event_search' - Active scheduled searches
-        - filter=created_on:>'2023-01-01' - Created after date
-        - filter=id:'45c59557ded4413cafb8ff81e7640456' - Specific report by ID
+        Use this to find reports by status, type, creator, or creation date. Consult
+        falcon://scheduled-reports/search/fql-guide before constructing filter expressions.
+        Returns full report/search entity details including schedule configuration.
+        Responses include `pagination.total` (the total number of records matching the filter, or null when the API does not report a count) — use it to answer "how many" questions.
         """
-        report_ids = self._base_search_api_call(
+        report_ids, pagination = self._base_search_with_meta(
             operation="scheduled_reports_query",
             search_params={
                 "filter": filter,
@@ -146,45 +133,51 @@ class ScheduledReportsModule(BaseModule):
                 "q": q,
             },
             error_message="Failed to search for scheduled reports",
-            default_result=[],
         )
 
         if self._is_error(report_ids):
             return [report_ids]
 
-        # If we have report IDs, get the full details for each one
-        if report_ids:
-            details = self._base_get_by_ids(
-                operation="scheduled_reports_get",
-                ids=report_ids,
-                use_params=True,
-            )
+        if not report_ids:
+            return self._build_pagination_envelope([], pagination, filter)
 
-            if self._is_error(details):
-                return [details]
+        details = self._base_get_by_ids(
+            operation="scheduled_reports_get",
+            ids=report_ids,
+            use_params=True,
+        )
 
-            return details
+        if self._is_error(details):
+            return [details]
 
-        return []
+        # Restore the query-step sort order if the get endpoint reorders results.
+        details = self._reorder_by_ids(report_ids, details, id_field="id")
+        return self._build_pagination_envelope(details, pagination, filter)
 
     def launch_scheduled_report(
         self,
         id: str = Field(description="Scheduled report/search entity ID to execute."),
     ) -> list[dict[str, Any]]:
-        """Launch a scheduled report on demand.
+        """Launch a scheduled report or search on demand.
 
-        Execute a scheduled report or search immediately, outside of its recurring schedule.
-        This creates a new execution instance that can be tracked and downloaded.
-
-        Returns the execution details including the execution ID which can be used with:
-        - falcon_search_report_executions to check status (filter=id:'<execution-id>')
-        - falcon_download_report_execution to download results when ready
-
-        Note: The report will run with the same parameters as defined in the entity configuration.
+        Executes the report immediately outside its recurring schedule. Returns
+        execution records containing an execution ID that can be tracked with
+        falcon_search_report_executions and downloaded with
+        falcon_download_report_execution when complete.
         """
-        result = self._base_query_api_call(
+        # scheduled_reports_launch expects the request body as a JSON array of
+        # {id} objects, not a bare object. _base_query_api_call routes body_params
+        # through prepare_api_parameters, which always returns a plain dict, so
+        # call the client directly to preserve the list-of-dict shape (mirrors
+        # falcon_mcp/modules/rtr.py and correlation_rules.py).
+        response = self.client.command(
+            "scheduled_reports_launch",
+            body=[{"id": id}],
+        )
+
+        result = handle_api_response(
+            response,
             operation="scheduled_reports_launch",
-            body_params={"id": id},
             error_message="Failed to launch scheduled report",
             default_result=[],
         )
@@ -198,7 +191,7 @@ class ScheduledReportsModule(BaseModule):
         self,
         filter: str | None = Field(
             default=None,
-            description="FQL filter to limit results. Use id:'<id>' to get specific executions. IMPORTANT: use the `falcon://scheduled-reports/executions/search/fql-guide` resource when building this filter parameter.",
+            description="FQL filter expression. See `falcon://scheduled-reports/executions/search/fql-guide` for syntax.",
         ),
         limit: int = Field(
             default=10,
@@ -214,27 +207,15 @@ class ScheduledReportsModule(BaseModule):
             default=None,
             description="Property to sort by. Ex: created_on.asc, last_updated_on.desc",
         ),
-    ) -> list[dict[str, Any]]:
-        """Search for scheduled report/search executions in your CrowdStrike environment.
+    ) -> list[dict[str, Any]] | dict[str, Any]:
+        """Search for report/search execution history.
 
-        Returns full details for matching executions. Use the filter parameter to narrow
-        results or retrieve specific executions by ID.
-
-        IMPORTANT: You must use the `falcon://scheduled-reports/executions/search/fql-guide`
-        resource when you need to use the `filter` parameter.
-
-        Common use cases:
-        - Get specific execution by ID: filter=id:'<execution-id>'
-        - Get all executions for a report: filter=scheduled_report_id:'<report-id>'
-        - Find completed executions: filter=status:'DONE'
-        - Find failed executions: filter=status:'FAILED'
-
-        Examples:
-        - filter=status:'DONE'+created_on:>'2023-01-01' - Successful runs after date
-        - filter=scheduled_report_id:'abc123' - All executions for report abc123
-        - filter=id:'f1984ff006a94980b352f18ee79aed77' - Specific execution by ID
+        Use this to find executions by status, report ID, or completion date. Consult
+        falcon://scheduled-reports/executions/search/fql-guide before constructing filter
+        expressions. Returns full execution details including status and timestamps.
+        Responses include `pagination.total` (the total number of records matching the filter, or null when the API does not report a count) — use it to answer "how many" questions.
         """
-        execution_ids = self._base_search_api_call(
+        execution_ids, pagination = self._base_search_with_meta(
             operation="report_executions_query",
             search_params={
                 "filter": filter,
@@ -243,44 +224,36 @@ class ScheduledReportsModule(BaseModule):
                 "sort": sort,
             },
             error_message="Failed to search for report executions",
-            default_result=[],
         )
 
         if self._is_error(execution_ids):
             return [execution_ids]
 
-        # If we have execution IDs, get the full details for each one
-        if execution_ids:
-            details = self._base_get_by_ids(
-                operation="report_executions_get",
-                ids=execution_ids,
-                use_params=True,
-            )
+        if not execution_ids:
+            return self._build_pagination_envelope([], pagination, filter)
 
-            if self._is_error(details):
-                return [details]
+        details = self._base_get_by_ids(
+            operation="report_executions_get",
+            ids=execution_ids,
+            use_params=True,
+        )
 
-            return details
+        if self._is_error(details):
+            return [details]
 
-        return []
+        # Restore the query-step sort order if the get endpoint reorders results.
+        details = self._reorder_by_ids(execution_ids, details, id_field="id")
+        return self._build_pagination_envelope(details, pagination, filter)
 
     def download_report_execution(
         self,
         id: str = Field(description="Report execution ID to download."),
     ) -> str | list[dict[str, Any]] | dict[str, Any]:
-        """Download generated report results.
+        """Download the results of a completed report execution.
 
-        Download the report results for a completed execution. Only works for executions
-        with status='DONE'.
-
-        The return format depends on how the scheduled report was configured:
-        - CSV format reports: Returns string containing CSV data
-        - JSON format reports: Returns list of result records
-        - PDF format reports: Not supported (returns error - use CSV/JSON instead)
-
-        Note: Check execution status first using falcon_search_report_executions with
-        filter=id:'<execution-id>' to ensure the execution is complete (status='DONE')
-        before attempting to download.
+        Only works for executions with status='DONE'. Check status first using
+        falcon_search_report_executions. Returns CSV string or JSON records depending
+        on the report's configured format. PDF format is not supported.
         """
         prepared_params = prepare_api_parameters({"ids": id})
         response = self.client.command(

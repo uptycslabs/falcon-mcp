@@ -62,7 +62,7 @@ class HostsModule(BaseModule):
         self,
         filter: str | None = Field(
             default=None,
-            description="FQL Syntax formatted string used to limit the results. IMPORTANT: use the `falcon://hosts/search/fql-guide` resource when building this filter parameter.",
+            description="FQL filter expression. See `falcon://hosts/search/fql-guide` for syntax.",
             examples={"platform_name:'Windows'", "hostname:'PC*'"},
         ),
         limit: int = Field(
@@ -96,13 +96,16 @@ class HostsModule(BaseModule):
             """).strip(),
             examples={"hostname.asc", "last_seen.desc"},
         ),
-    ) -> list[dict[str, Any]]:
+    ) -> list[dict[str, Any]] | dict[str, Any]:
         """Search for hosts in your CrowdStrike environment.
 
-        IMPORTANT: You must use the `falcon://hosts/search/fql-guide` resource when you need to use the `filter` parameter.
-        This resource contains the guide on how to build the FQL `filter` parameter for the `falcon_search_hosts` tool.
+        Use this to find devices by hostname, platform, IP, sensor version, or other
+        attributes. Consult falcon://hosts/search/fql-guide before constructing filter
+        expressions. Returns full host details including device info, OS, and network
+        context.
+        Responses include `pagination.total` (the total number of records matching the filter, or null when the API does not report a count) — use it to answer "how many" questions.
         """
-        device_ids = self._base_search_api_call(
+        device_ids, pagination = self._base_search_with_meta(
             operation="QueryDevicesByFilter",
             search_params={
                 "filter": filter,
@@ -113,27 +116,25 @@ class HostsModule(BaseModule):
             error_message="Failed to search hosts",
         )
 
-        # If handle_api_response returns an error dict instead of a list,
-        # it means there was an error, so we return it wrapped in a list
         if self._is_error(device_ids):
             return [device_ids]
 
-        # If we have device IDs, get the details for each one
-        if device_ids:
-            details = self._base_get_by_ids(
-                operation="PostDeviceDetailsV2",
-                ids=device_ids,
-                id_key="ids",
-            )
+        if not device_ids:
+            return self._build_pagination_envelope([], pagination, filter)
 
-            # If handle_api_response returns an error dict instead of a list,
-            # it means there was an error, so we return it wrapped in a list
-            if self._is_error(details):
-                return [details]
+        details = self._base_get_by_ids(
+            operation="PostDeviceDetailsV2",
+            ids=device_ids,
+            id_key="ids",
+        )
 
-            return details
+        if self._is_error(details):
+            return [details]
 
-        return []
+        # Restore the query-step sort order in case the details endpoint
+        # returns entities in a different order (validated field: device_id).
+        details = self._reorder_by_ids(device_ids, details, id_field="device_id")
+        return self._build_pagination_envelope(details, pagination, filter)
 
     def get_host_details(
         self,
@@ -141,11 +142,11 @@ class HostsModule(BaseModule):
             description="Host device IDs to retrieve details for. You can get device IDs from the search_hosts operation, the Falcon console, or the Streaming API. Maximum: 5000 IDs per request."
         ),
     ) -> list[dict[str, Any]] | dict[str, Any]:
-        """Retrieve detailed information for specified host device IDs.
+        """Retrieve detailed information for one or more host device IDs.
 
-        This tool returns comprehensive host details for one or more device IDs.
-        Use this when you already have specific device IDs and need their full details.
-        For searching/discovering hosts, use the `falcon_search_hosts` tool instead.
+        Use when you already have specific device IDs from search results, the Falcon
+        console, or the Streaming API. For discovering hosts by criteria, use
+        falcon_search_hosts instead. Returns comprehensive host details.
         """
         logger.debug("Getting host details for IDs: %s", ids)
 

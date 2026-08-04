@@ -2,48 +2,10 @@
 Contains Cloud resources.
 """
 
+from falcon_mcp.common.fql import FQL_BASE_OPERATORS
 from falcon_mcp.common.utils import generate_md_table
 
-FQL_DOCUMENTATION = """Falcon Query Language (FQL)
-
-=== BASIC SYNTAX ===
-property_name:[operator]'value'
-
-=== AVAILABLE OPERATORS ===
-• No operator = equals (default)
-• ! = not equal
-• > = greater than
-• >= = greater than or equal
-• < = less than
-• <= = less than or equal
-• ~ = text match (ignores case, spaces, punctuation)
-• !~ = not text match
-• * = wildcard (one or more characters)
-• !* = not wildcard (one or more characters)
-
-=== COMBINING CONDITIONS ===
-• + = AND condition
-• , = OR condition
-• ( ) = Group expressions
-
-=== DATA TYPES & SUPPORTED OPERATORS ===
-• String: equal, not equal, wildcard.
-• Date, Timestamp: equal, not equal, less than, less than or equal, greater than, greater than or equal.
-• Boolean: equal, not equal.
-• Number: equal, not equal, less than, less than or equal, greater than, greater than or equal.
-
-=== DATA TYPES & SYNTAX ===
-• String: 'value' or ['value1', 'value2'] for a list of values. Wildcards: 'partial*' or '*partial' or '*partial*'.
-• Date, Timestamp: 'YYYY-MM-DDTHH:MM:SSZ' (UTC format).
-• Boolean: true or false (no quotes).
-• Number: 123 (no quotes).
-
-=== IMPORTANT NOTES ===
-• Use single quotes around string values: 'value'
-• Use square brackets for list of string values: ['value 1', 'value 2']
-• Use wildcard operator to determine if a property contains or not a substring. Ex: `property:*'*sub*'`, `property:!*'*sub*'`
-• Dates and timestamps format must be UTC: 'YYYY-MM-DDTHH:MM:SSZ'
-"""
+FQL_DOCUMENTATION = FQL_BASE_OPERATORS
 
 # List of tuples containing filter options data: (name, type, description)
 KUBERNETES_CONTAINERS_FQL_FILTERS = [
@@ -838,6 +800,311 @@ SEARCH_CSPM_ASSETS_FQL_FILTERS = [
     ),
 ]
 
+CSPM_IOM_FINDINGS_FQL_FILTERS = [
+    (
+        "Name",
+        "Type",
+        "Description"
+    ),
+    (
+        "account_id",
+        "String",
+        """
+        The cloud provider account ID.
+
+        Ex: account_id:'123456789012'
+        """
+    ),
+    (
+        "account_name",
+        "String",
+        """
+        The cloud provider account name.
+
+        Ex: account_name:'production-account'
+        """
+    ),
+    (
+        "cloud_provider",
+        "String",
+        """
+        The cloud provider. Values: aws, azure, gcp.
+
+        Ex: cloud_provider:'aws'
+        Ex: cloud_provider:['aws', 'azure']
+        """
+    ),
+    (
+        "severity",
+        "String",
+        """
+        The severity of the misconfiguration finding.
+        Values: critical, high, medium, low, informational.
+
+        Ex: severity:'critical'
+        Ex: severity:['critical', 'high']
+        """
+    ),
+    (
+        "status",
+        "String",
+        """
+        The status of the finding.
+        Values: open, suppressed, pass.
+
+        Ex: status:'open'
+        """
+    ),
+    (
+        "service",
+        "String",
+        """
+        The cloud service (e.g., EC2, S3, IAM, KeyVault, Compute Engine).
+
+        Ex: service:'S3'
+        Ex: service:'IAM'
+        """
+    ),
+    (
+        "service_category",
+        "String",
+        """
+        Broader service category.
+        Examples: Compute, Storage, Networking, Identity.
+
+        Ex: service_category:'Identity'
+        """
+    ),
+    (
+        "region",
+        "String",
+        """
+        The cloud region where the finding was detected.
+
+        Ex: region:'us-east-1'
+        Ex: region:['us-east-1', 'eu-west-1']
+        """
+    ),
+    (
+        "resource_id",
+        "String",
+        """
+        The unique identifier of the affected resource.
+
+        Ex: resource_id:'arn:aws:s3:::my-bucket'
+        """
+    ),
+    (
+        "resource_type",
+        "String",
+        """
+        The type of cloud resource affected.
+
+        Ex: resource_type:'AWS::S3::Bucket'
+        Ex: resource_type:*'*EC2*'
+        """
+    ),
+    (
+        "resource_type_name",
+        "String",
+        """
+        Human-readable resource type name.
+
+        Ex: resource_type_name:'S3 Bucket'
+        """
+    ),
+    (
+        "rule_name",
+        "String",
+        """
+        The name of the misconfiguration rule that triggered the finding.
+
+        Ex: rule_name:*'*encryption*'
+        Ex: rule_name:*'*public*'
+        """
+    ),
+    (
+        "rule_id",
+        "String",
+        """
+        The unique rule identifier.
+
+        Ex: rule_id:'CS-001'
+        """
+    ),
+    (
+        "policy_name",
+        "String",
+        """
+        The policy name containing the rule.
+
+        Ex: policy_name:*'*CIS*'
+        """
+    ),
+    (
+        "policy_id",
+        "String",
+        """
+        The policy identifier.
+
+        Ex: policy_id:'123'
+        """
+    ),
+    (
+        "benchmark_name",
+        "String",
+        """
+        Compliance benchmark name (e.g., CIS, NIST, SOC2).
+
+        Ex: benchmark_name:*'*CIS*'
+        """
+    ),
+    (
+        "framework",
+        "String",
+        """
+        Compliance framework the finding maps to.
+
+        Ex: framework:'CIS'
+        """
+    ),
+    (
+        "attack_type",
+        "String",
+        """
+        MITRE ATT&CK attack type classification.
+
+        Ex: attack_type:*'*credential*'
+        """
+    ),
+    (
+        "tactic_name",
+        "String",
+        """
+        MITRE ATT&CK tactic name.
+
+        Ex: tactic_name:'Credential Access'
+        """
+    ),
+    (
+        "technique_name",
+        "String",
+        """
+        MITRE ATT&CK technique name.
+
+        Ex: technique_name:*'*Brute Force*'
+        """
+    ),
+    (
+        "first_detected",
+        "Timestamp",
+        """
+        When the finding was first detected in UTC format.
+
+        Ex: first_detected:>'2025-01-01T00:00:00Z'
+        """
+    ),
+    (
+        "last_detected",
+        "Timestamp",
+        """
+        When the finding was last detected in UTC format.
+
+        Ex: last_detected:>'2025-04-01T00:00:00Z'
+        """
+    ),
+    (
+        "suppressed_by",
+        "String",
+        """
+        The user or rule that suppressed this finding.
+
+        Ex: suppressed_by:*'*admin*'
+        """
+    ),
+    (
+        "suppression_reason",
+        "String",
+        """
+        The reason the finding was suppressed.
+        Values: accept-risk, compensating-control, false-positive.
+
+        Ex: suppression_reason:'accept-risk'
+        """
+    ),
+    (
+        "tag_key",
+        "String",
+        """
+        Cloud resource tag key.
+
+        Ex: tag_key:'Environment'
+        """
+    ),
+    (
+        "tag_value",
+        "String",
+        """
+        Cloud resource tag value.
+
+        Ex: tag_value:'Production'
+        """
+    ),
+    (
+        "cloud_group",
+        "String",
+        """
+        Cloud group identifier for organizational grouping.
+
+        Ex: cloud_group:'prod-group'
+        """
+    ),
+]
+
+CSPM_IOM_FINDINGS_FQL_DOCUMENTATION = (
+    FQL_DOCUMENTATION
+    + """
+=== falcon_search_iom_findings FQL filter available fields ===
+
+""" + generate_md_table(CSPM_IOM_FINDINGS_FQL_FILTERS) + """
+
+=== falcon_search_iom_findings FQL filter examples ===
+
+# Find critical and high severity open findings
+severity:['critical', 'high']+status:'open'
+
+# Find open findings in AWS for a specific service
+cloud_provider:'aws'+service:'S3'+status:'open'
+
+# Find findings detected in the last 7 days
+first_detected:>'2025-05-05T00:00:00Z'+status:'open'
+
+# Find IAM-related misconfigurations across all clouds
+service_category:'Identity'+severity:['critical', 'high']
+
+# Find findings for a specific rule by name
+rule_name:*'*encryption*'+status:'open'
+
+# Find suppressed findings with a specific reason
+status:'suppressed'+suppression_reason:'accept-risk'
+
+# Find findings mapped to CIS benchmark
+benchmark_name:*'*CIS*'+severity:'critical'
+
+# Find findings for specific cloud accounts
+account_id:['123456789012', '987654321098']+status:'open'
+
+# Find findings by MITRE ATT&CK tactic
+tactic_name:'Credential Access'+severity:['critical', 'high']
+
+# Find findings in specific regions
+region:['us-east-1', 'eu-west-1']+cloud_provider:'aws'+status:'open'
+
+# Find findings by resource tag
+tag_key:'Environment'+tag_value:'Production'+severity:'critical'
+"""
+)
+
 SEARCH_CSPM_ASSETS_FQL_DOCUMENTATION = (
     FQL_DOCUMENTATION
     + """
@@ -922,5 +1189,185 @@ updated_at:>'2025-03-11T00:00:00Z'
 
 # Find unmanaged assets with IOAs
 managed_by:'Unmanaged'+ioa_count:>0
+"""
+)
+
+CLOUD_RISKS_FQL_FILTERS = [
+    (
+        "Name",
+        "Type",
+        "Description",
+    ),
+    (
+        "account_id",
+        "String",
+        "Cloud account identifier.\n\nEx: account_id:'123456789012'",
+    ),
+    (
+        "account_name",
+        "String",
+        "Cloud account display name.\n\nEx: account_name:'prod-account'",
+    ),
+    (
+        "adversary",
+        "String",
+        "Associated adversary or threat group name.\n\nEx: adversary:'COZY BEAR'",
+    ),
+    (
+        "asset_gcrn",
+        "String",
+        "Global cloud resource name identifier.\n\nEx: asset_gcrn:'arn:aws:ec2:us-east-1:123456789012:instance/i-1234'",
+    ),
+    (
+        "asset_id",
+        "String",
+        "Asset identifier.\n\nEx: asset_id:'abc123'",
+    ),
+    (
+        "asset_name",
+        "String",
+        "Asset display name.\n\nEx: asset_name:'my-ec2-instance'",
+    ),
+    (
+        "asset_region",
+        "String",
+        "Cloud region where the asset resides.\n\nEx: asset_region:'us-east-1'",
+    ),
+    (
+        "asset_type",
+        "String",
+        "Type of cloud asset.\n\nEx: asset_type:'AWS::EC2::Instance'",
+    ),
+    (
+        "cloud_group",
+        "String",
+        "Cloud group identifier the asset belongs to.\n\nEx: cloud_group:'my-group-id'",
+    ),
+    (
+        "cloud_provider",
+        "String",
+        "Cloud provider name.\n\nEx: cloud_provider:'aws'",
+    ),
+    (
+        "first_seen",
+        "Timestamp",
+        "When the risk was first observed. Supports range operators. Use absolute ISO-8601 timestamps only.\n\nEx: first_seen:>'2024-01-01T00:00:00Z'",
+    ),
+    (
+        "groups",
+        "String",
+        "Cloud group associated with this risk.\n\nEx: groups:'my-group-id'",
+    ),
+    (
+        "groups.business_impact",
+        "String",
+        "Business impact level of the associated cloud group.\n\nEx: groups.business_impact:'high'",
+    ),
+    (
+        "groups.business_unit",
+        "String",
+        "Business unit of the associated cloud group.\n\nEx: groups.business_unit:'engineering'",
+    ),
+    (
+        "groups.environment",
+        "String",
+        "Environment tag of the associated cloud group.\n\nEx: groups.environment:'production'",
+    ),
+    (
+        "last_seen",
+        "Timestamp",
+        "When the risk was last observed. Supports range operators. Use absolute ISO-8601 timestamps only.\n\nEx: last_seen:>'2024-01-01T00:00:00Z'",
+    ),
+    (
+        "resolved_at",
+        "Timestamp",
+        "When the risk was resolved. Supports range operators.\n\nEx: resolved_at:>'2024-01-01T00:00:00Z'",
+    ),
+    (
+        "risk_factor",
+        "String",
+        "Risk factor identifier.\n\nEx: risk_factor:'PUBLIC_ACCESS'",
+    ),
+    (
+        "rule_id",
+        "String",
+        "ID of the rule that triggered the risk.\n\nEx: rule_id:'ABC-001'",
+    ),
+    (
+        "rule_name",
+        "String",
+        "Name of the rule that triggered the risk.\n\nEx: rule_name:'S3 Bucket Public Access'",
+    ),
+    (
+        "service_category",
+        "String",
+        "Cloud service category.\n\nEx: service_category:'Storage'",
+    ),
+    (
+        "severity",
+        "String",
+        "Risk severity level.\nValues: Critical, High, Medium, Low, Informational.\n\nEx: severity:'Critical'",
+    ),
+    (
+        "status",
+        "String",
+        "Risk lifecycle status.\nValues: Open, Resolved, Suppressed.\n\nEx: status:'Open'",
+    ),
+    (
+        "suppressed_by",
+        "String",
+        "User or entity who suppressed the risk.\n\nEx: suppressed_by:'analyst@example.com'",
+    ),
+    (
+        "suppressed_reason",
+        "String",
+        "Reason the risk was suppressed.\n\nEx: suppressed_reason:'accepted_risk'",
+    ),
+    (
+        "tags",
+        "String",
+        "Resource tags associated with the asset.\n\nEx: tags:'Environment:Production'",
+    ),
+    (
+        "threat_actors",
+        "String",
+        "Threat actors associated with the risk.\n\nEx: threat_actors:'APT29'",
+    ),
+]
+
+CLOUD_RISKS_FQL_DOCUMENTATION = (
+    FQL_DOCUMENTATION
+    + """
+=== falcon_search_cloud_risks FQL filter available fields ===
+
+""" + generate_md_table(CLOUD_RISKS_FQL_FILTERS) + """
+
+=== falcon_search_cloud_risks FQL filter sort fields ===
+
+Use `field|asc` or `field|desc` suffix:
+
+`account_id`, `account_name`, `asset_id`, `asset_name`, `asset_region`, `asset_type`,
+`cloud_provider`, `first_seen`, `last_seen`, `resolved_at`, `rule_name`,
+`service_category`, `severity`, `status`
+
+=== falcon_search_cloud_risks FQL filter examples ===
+
+# Open critical risks in AWS
+severity:'Critical'+status:'Open'+cloud_provider:'aws'
+
+# Risks in production group
+groups.environment:'production'
+
+# Risks first seen after a specific date (use absolute ISO-8601 only)
+first_seen:>'2025-01-01T00:00:00Z'
+
+# Resolved risks after a specific date
+resolved_at:>'2025-01-01T00:00:00Z'+status:'Resolved'
+
+# Suppressed risks
+status:'Suppressed'
+
+# Risks by service category
+service_category:'Storage'+severity:'Critical'
 """
 )

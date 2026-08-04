@@ -1,46 +1,57 @@
 ![CrowdStrike Logo (Light)](https://raw.githubusercontent.com/CrowdStrike/.github/main/assets/cs-logo-light-mode.png#gh-light-mode-only)
 ![CrowdStrike Logo (Dark)](https://raw.githubusercontent.com/CrowdStrike/.github/main/assets/cs-logo-dark-mode.png#gh-dark-mode-only)
 
+<!-- mcp-name: io.github.CrowdStrike/falcon-mcp -->
+
 # falcon-mcp
 
 [![PyPI version](https://badge.fury.io/py/falcon-mcp.svg)](https://badge.fury.io/py/falcon-mcp)
 [![PyPI - Python Version](https://img.shields.io/pypi/pyversions/falcon-mcp)](https://pypi.org/project/falcon-mcp/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Documentation](https://img.shields.io/badge/docs-GitHub%20Pages-blue)](https://crowdstrike.github.io/falcon-mcp/)
+[![MCP Registry](https://img.shields.io/badge/MCP_Registry-falcon--mcp-blue)](https://registry.modelcontextprotocol.io/?q=io.github.CrowdStrike%2Ffalcon-mcp&all=1)
+[![GitHub MCP](https://img.shields.io/badge/GitHub_MCP-falcon--mcp-blue?logo=github)](https://github.com/mcp/CrowdStrike/falcon-mcp)
+[![Gemini CLI Extension](https://img.shields.io/badge/Gemini_CLI-falcon--mcp-blue?logo=google)](https://geminicli.com/extensions/?name=CrowdStrikefalcon-mcp)
 
-**falcon-mcp** is a Model Context Protocol (MCP) server that connects AI agents with the CrowdStrike Falcon platform, powering intelligent security analysis in your agentic workflows. It delivers programmatic access to essential security capabilities—including detections, incidents, and behaviors—establishing the foundation for advanced security operations and automation.
+**falcon-mcp** is a Model Context Protocol (MCP) server that connects AI agents with the CrowdStrike Falcon platform, powering intelligent security analysis in your agentic workflows. It delivers programmatic access to essential security capabilities—including detections, threat intelligence, and host management—establishing the foundation for advanced security operations and automation.
 
 > [!IMPORTANT]
 > **🚧 Public Preview**: This project is currently in public preview and under active development. Features and functionality may change before the stable 1.0 release. While we encourage exploration and testing, please avoid production deployments. We welcome your feedback through [GitHub Issues](https://github.com/crowdstrike/falcon-mcp/issues) to help shape the final release.
 
 ## Documentation
 
-Full docs are available at **[crowdstrike.github.io/falcon-mcp](https://crowdstrike.github.io/falcon-mcp/)**.
+Full docs are available at **[developer.crowdstrike.com/falcon-mcp](https://developer.crowdstrike.com/falcon-mcp/)**.
 
 ## Modules
 
 | Module | Description |
-|--------|-------------|
+| ------ | ----------- |
 | Core | Basic connectivity and system information |
-| [Cloud Security](https://crowdstrike.github.io/falcon-mcp/modules/cloud/) | Kubernetes containers, image vulnerabilities, and CSPM asset inventory |
-| [Custom IOA](https://crowdstrike.github.io/falcon-mcp/modules/custom-ioa/) | Create and manage Custom IOA behavioral detection rules and rule groups |
-| [Detections](https://crowdstrike.github.io/falcon-mcp/modules/detections/) | Find and analyze detections to understand malicious activity |
-| [Discover](https://crowdstrike.github.io/falcon-mcp/modules/discover/) | Search application inventory and discover unmanaged assets |
-| [Firewall Management](https://crowdstrike.github.io/falcon-mcp/modules/firewall/) | Search and manage firewall rules and rule groups |
-| [Hosts](https://crowdstrike.github.io/falcon-mcp/modules/hosts/) | Manage and query host/device information |
-| [Identity Protection](https://crowdstrike.github.io/falcon-mcp/modules/idp/) | Entity investigation and identity protection analysis |
-| [Incidents](https://crowdstrike.github.io/falcon-mcp/modules/incidents/) | Analyze security incidents and coordinated activities |
-| [Intel](https://crowdstrike.github.io/falcon-mcp/modules/intel/) | Research threat actors, IOCs, and intelligence reports |
-| [IOC](https://crowdstrike.github.io/falcon-mcp/modules/ioc/) | Search, create, and remove custom indicators of compromise |
-| [NGSIEM](https://crowdstrike.github.io/falcon-mcp/modules/ngsiem/) | Execute CQL queries against Next-Gen SIEM |
-| [Real Time Response](https://crowdstrike.github.io/falcon-mcp/modules/rtr/) | Initialize RTR sessions and execute read-only triage commands |
-| [Scheduled Reports](https://crowdstrike.github.io/falcon-mcp/modules/scheduled-reports/) | Manage scheduled reports and download report files |
-| [Sensor Usage](https://crowdstrike.github.io/falcon-mcp/modules/sensor-usage/) | Access and analyze sensor usage data |
-| [Serverless](https://crowdstrike.github.io/falcon-mcp/modules/serverless/) | Search for vulnerabilities in serverless functions |
-| [Shield](https://crowdstrike.github.io/falcon-mcp/modules/shield/) | SaaS security posture, checks, alerts, and app inventory |
-| [Spotlight](https://crowdstrike.github.io/falcon-mcp/modules/spotlight/) | Manage and analyze vulnerability data and security assessments |
+| [Case Management](https://developer.crowdstrike.com/falcon-mcp/modules/cases/) | Case lifecycle management, evidence attachment, tagging, and templates |
+| [Cloud Security](https://developer.crowdstrike.com/falcon-mcp/modules/cloud/) | Kubernetes containers, image vulnerabilities, CSPM asset inventory, IOM findings, suppression rules, cloud risks, and cloud groups |
+| [Correlation Rules](https://developer.crowdstrike.com/falcon-mcp/modules/correlationrules/) | Search, create, update, and manage NG-SIEM correlation rules |
+| [Custom IOA](https://developer.crowdstrike.com/falcon-mcp/modules/custom-ioa/) | Create and manage Custom IOA behavioral detection rules and rule groups |
+| [Data Protection](https://developer.crowdstrike.com/falcon-mcp/modules/data-protection/) | Search Data Protection classifications, policies, and content patterns |
+| [Detections](https://developer.crowdstrike.com/falcon-mcp/modules/detections/) | Find, aggregate, and analyze detections to understand malicious activity |
+| [Discover](https://developer.crowdstrike.com/falcon-mcp/modules/discover/) | Search application inventory and discover unmanaged assets |
+| [Exclusions](https://developer.crowdstrike.com/falcon-mcp/modules/exclusions/) | Search, create, update, and delete IOA, machine learning, sensor visibility, and certificate-based exclusions |
+| [Firewall Management](https://developer.crowdstrike.com/falcon-mcp/modules/firewall/) | Search and manage firewall rules and rule groups |
+| [Host Groups](https://developer.crowdstrike.com/falcon-mcp/modules/host-groups/) | Search, create, update, and delete host groups; manage group membership |
+| [Hosts](https://developer.crowdstrike.com/falcon-mcp/modules/hosts/) | Manage and query host/device information |
+| [Identity Protection](https://developer.crowdstrike.com/falcon-mcp/modules/idp/) | Entity investigation and identity protection analysis |
+| [Intel](https://developer.crowdstrike.com/falcon-mcp/modules/intel/) | Research threat actors, IOCs, and intelligence reports |
+| [IOC](https://developer.crowdstrike.com/falcon-mcp/modules/ioc/) | Search, create, and remove custom indicators of compromise |
+| [NGSIEM](https://developer.crowdstrike.com/falcon-mcp/modules/ngsiem/) | Execute CQL queries against Next-Gen SIEM |
+| [Policies](https://developer.crowdstrike.com/falcon-mcp/modules/policies/) | Search, create, update, and delete prevention, sensor update, firewall, device control, response, and content update policies; manage host-group assignment, enable/disable, and precedence |
+| [Quarantine](https://developer.crowdstrike.com/falcon-mcp/modules/quarantine/) | Search quarantine records, preview action counts, and release, unrelease, or delete quarantined files |
+| [Real Time Response](https://developer.crowdstrike.com/falcon-mcp/modules/rtr/) | Audit, summarize, and run read-only RTR triage workflows |
+| [Recon](https://developer.crowdstrike.com/falcon-mcp/modules/recon/) | Search Falcon Intelligence Recon notifications (recon alerts), monitoring rules, and exposed-data records for dark web, leaked credentials, and typosquatting |
+| [Scheduled Reports](https://developer.crowdstrike.com/falcon-mcp/modules/scheduled-reports/) | Manage scheduled reports and download report files |
+| [Sensor Usage](https://developer.crowdstrike.com/falcon-mcp/modules/sensor-usage/) | Access and analyze sensor usage data |
+| [Serverless](https://developer.crowdstrike.com/falcon-mcp/modules/serverless/) | Search for vulnerabilities in serverless functions |
+| [Shield](https://developer.crowdstrike.com/falcon-mcp/modules/shield/) | SaaS security posture, checks, alerts, and app inventory |
+| [Spotlight](https://developer.crowdstrike.com/falcon-mcp/modules/spotlight/) | Manage and analyze vulnerability data and security assessments |
 
-See the [Module Overview](https://crowdstrike.github.io/falcon-mcp/modules/overview/) for required API scopes, available tools, and FQL resources.
+See the [Module Overview](https://developer.crowdstrike.com/falcon-mcp/modules/overview/) for required API scopes, available tools, and FQL resources.
 
 ## Quick Start
 
@@ -60,7 +71,7 @@ pip install falcon-mcp
 
 ### Configure
 
-Set the required environment variables (or use a `.env` file — see the [Configuration Guide](https://crowdstrike.github.io/falcon-mcp/getting-started/configuration/)):
+Set the required environment variables (or use a `.env` file — see the [Configuration Guide](https://developer.crowdstrike.com/falcon-mcp/getting-started/configuration/)):
 
 ```bash
 export FALCON_CLIENT_ID="your-client-id"
@@ -74,7 +85,7 @@ export FALCON_BASE_URL="https://api.crowdstrike.com"
 falcon-mcp
 ```
 
-See the [Getting Started guide](https://crowdstrike.github.io/falcon-mcp/getting-started/installation/) for full installation and configuration details.
+See the [Getting Started guide](https://developer.crowdstrike.com/falcon-mcp/getting-started/installation/) for full installation and configuration details.
 
 ## Editor Integration
 
@@ -107,7 +118,7 @@ See the [Getting Started guide](https://crowdstrike.github.io/falcon-mcp/getting
         "/path/to/.env",
         "falcon-mcp",
         "--modules",
-        "detections,incidents,intel"
+        "detections,hosts,intel"
       ]
     }
   }
@@ -134,7 +145,7 @@ See the [Getting Started guide](https://crowdstrike.github.io/falcon-mcp/getting
 }
 ```
 
-See the [Usage guide](https://crowdstrike.github.io/falcon-mcp/usage/cli/) for all command line options, module configuration, and library usage.
+See the [Usage guide](https://developer.crowdstrike.com/falcon-mcp/usage/cli/) for all command line options, module configuration, and library usage.
 
 ## Container Usage
 
@@ -145,16 +156,40 @@ docker pull quay.io/crowdstrike/falcon-mcp:latest
 # Run with .env file (stdio transport)
 docker run -i --rm --env-file /path/to/.env quay.io/crowdstrike/falcon-mcp:latest
 
-# Run with streamable-http transport
+# Run with streamable-http transport (add --api-key when the port is reachable beyond localhost)
 docker run --rm -p 8000:8000 --env-file /path/to/.env \
-  quay.io/crowdstrike/falcon-mcp:latest --transport streamable-http --host 0.0.0.0
+  quay.io/crowdstrike/falcon-mcp:latest \
+  --transport streamable-http --host 0.0.0.0 --api-key your-secret-key
 ```
 
-See the [Docker Deployment guide](https://crowdstrike.github.io/falcon-mcp/deployment/docker/) for building locally, custom ports, and advanced configurations.
+> [!CAUTION]
+> HTTP transports have no authentication by default. Binding to a non-loopback address (`--host 0.0.0.0`)
+> exposes an unauthenticated server that anyone who can reach the port can drive with your CrowdStrike
+> credentials. Keep the default loopback bind for local use and set `--api-key` whenever you bind wider.
+> Managed runtimes such as AWS Bedrock AgentCore and Google Cloud Run sit behind their own network
+> security layer, so this does not apply to them. See the
+> [Configuration guide](https://developer.crowdstrike.com/falcon-mcp/getting-started/configuration/#http-transport-security).
+
+See the [Docker Deployment guide](https://developer.crowdstrike.com/falcon-mcp/deployment/docker/) for building locally, custom ports, and advanced configurations.
+
+## Dynamic Mode
+
+Running many modules at once inflates the context window every AI client must hold. Dynamic mode
+replaces the full tool surface with three tools — `falcon_list_enabled_modules` to see which
+modules are loaded, `falcon_search_tools` to discover the right tool on demand, and
+`falcon_execute_tool` to run it — so agents only load the schemas they actually need.
+
+```bash
+falcon-mcp --dynamic
+# or: FALCON_MCP_DYNAMIC=true
+```
+
+See the [Dynamic Mode guide](https://developer.crowdstrike.com/falcon-mcp/usage/dynamic-mode/) for
+the full discover → execute workflow and trade-offs.
 
 ## Deployment Options
 
-- [Amazon Bedrock AgentCore](https://crowdstrike.github.io/falcon-mcp/deployment/amazon-bedrock/)
+- [Amazon Bedrock AgentCore](https://developer.crowdstrike.com/falcon-mcp/deployment/amazon-bedrock/)
 - [Google Cloud (Cloud Run / Vertex AI)](./examples/adk/README.md)
 
 ## Contributing
@@ -170,15 +205,22 @@ uv run pytest
 ```
 
 > [!IMPORTANT]
-> This project uses [Conventional Commits](https://www.conventionalcommits.org/) for automated releases. Please follow the commit message format outlined in our [Contributing Guide](docs/CONTRIBUTING.md).
+> This project uses [Conventional Commits](https://www.conventionalcommits.org/) for automated releases. Please follow the commit message format outlined in our [Contributing Guide](.github/CONTRIBUTING.md).
 
 ### Developer Documentation
 
-- [Docs Site Guide](docs/development/docs_site.md): Architecture and development guide for the documentation site
-- [Module Development Guide](docs/development/module_development.md): Instructions for implementing new modules
-- [Resource Development Guide](docs/development/resource_development.md): Instructions for implementing resources
-- [End-to-End Testing Guide](docs/development/e2e_testing.md): Guide for running and understanding E2E tests
-- [Integration Testing Guide](docs/development/integration_testing.md): Guide for running integration tests with real API calls
+- [Documentation Guide](docs/development/docs-site.md): Architecture and maintenance guide for the documentation
+- [Module Development Guide](docs/development/module-development.md): Instructions for implementing new modules
+- [Resource Development Guide](docs/development/resource-development.md): Instructions for implementing resources
+- [Integration Testing Guide](docs/development/integration-testing.md): Guide for running integration tests with real API calls
+
+## Registries
+
+falcon-mcp is published to public MCP catalogs for discovery and one-click setup in compatible clients:
+
+- [MCP Registry](https://registry.modelcontextprotocol.io/?q=io.github.CrowdStrike%2Ffalcon-mcp&all=1)
+- [GitHub MCP Registry](https://github.com/mcp/CrowdStrike/falcon-mcp)
+- [Gemini CLI Extensions](https://geminicli.com/extensions/?name=CrowdStrikefalcon-mcp)
 
 ## License
 
@@ -186,6 +228,6 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## Support
 
-This is a community-driven, open source project. While it is not an official CrowdStroke product, it is actively maintained by CrowdStrike and supported in collaboration with the open source developer community.
+This is a community-driven, open source project. While it is not an official CrowdStrike product, it is actively maintained by CrowdStrike and supported in collaboration with the open source developer community.
 
 For more information, please see our [SUPPORT](SUPPORT.md) file.
