@@ -4,6 +4,7 @@ Detections module for Falcon MCP Server
 This module provides tools for accessing and analyzing CrowdStrike Falcon detections.
 """
 
+import re
 from textwrap import dedent
 from typing import Any, Literal
 
@@ -19,6 +20,73 @@ from falcon_mcp.resources.detections import (
 )
 
 logger = get_logger(__name__)
+
+# A composite alert ID is "<cid>:ind:<aid>:<detection_id>", where <cid> is the 32-hex
+# customer ID. The legacy Detections scheme "ldt:<aid>:<detect_id>" is separate and the
+# two must never be combined.
+_CID_PATTERN = re.compile(r"^[0-9a-f]{32}$", re.IGNORECASE)
+# The trailing detection-id segment on its own, e.g. "540784113761-10820-177012752" —
+# what is left when a caller strips the "<cid>:ind:<aid>:" prefix off a composite ID.
+_BARE_TAIL_PATTERN = re.compile(r"^\d+-\d+-\d+$")
+_COMPOSITE_ID_SHAPE = "<cid>:ind:<aid>:<detection_id>"
+
+
+def _malformed_composite_ids(ids: list[str]) -> list[tuple[str, str]]:
+    """Return [(id, what_is_wrong)] for IDs whose shape the Alerts API will reject.
+
+    Deliberately conservative: it flags only shapes observed failing in practice, so an
+    unfamiliar-but-valid scheme is passed through to the API rather than rejected here.
+    The common case is a caller that dropped the leading <cid> segment — the API then
+    answers "invalid CID provided" with no indication of which part was wrong, which is
+    unactionable on its own.
+    """
+    problems: list[tuple[str, str]] = []
+    for raw in ids:
+        candidate = (raw or "").strip()
+        segments = candidate.split(":")
+        first = segments[0] if segments else ""
+
+        if len(segments) == 1:
+            # Only flag a bare value that is recognisably a stripped composite tail.
+            # Any other single-segment value may belong to a scheme we do not know, so
+            # it is left for the API to accept or reject.
+            if _BARE_TAIL_PATTERN.match(candidate):
+                problems.append((
+                    raw,
+                    "looks like only the trailing detection-id of a composite ID — "
+                    f"the full {_COMPOSITE_ID_SHAPE} is required",
+                ))
+        elif first.lower() == "ldt" and ":ind:" in candidate.lower():
+            problems.append((
+                raw,
+                "mixes the legacy 'ldt:' scheme with a composite ':ind:' ID — "
+                "drop the 'ldt:' prefix and pass the composite ID unchanged",
+            ))
+        elif not _CID_PATTERN.match(first) and first.lower() != "ldt":
+            problems.append((
+                raw,
+                f"first segment {first!r} is not a 32-hex customer ID (CID) — "
+                f"the leading CID segment is required, as in {_COMPOSITE_ID_SHAPE}",
+            ))
+    return problems
+
+
+def _composite_id_error_response(malformed: list[tuple[str, str]]) -> dict[str, Any]:
+    """Build the error returned instead of calling the API with unusable IDs.
+
+    Mirrors the shape of the FQL/CQL error helpers: the failure plus enough context for
+    the caller to correct it without a second round trip.
+    """
+    return {
+        "error": "Malformed composite detection ID(s); no request was sent to Falcon",
+        "details": [{"id": bad, "problem": why} for bad, why in malformed],
+        "expected_format": _COMPOSITE_ID_SHAPE,
+        "hint": (
+            "Pass composite IDs through byte-for-byte as returned by "
+            "falcon_search_detections or supplied by the caller. Do not rebuild them, "
+            "strip the leading CID, or add an 'ldt:' prefix."
+        ),
+    }
 
 
 class DetectionsModule(BaseModule):
@@ -205,6 +273,9 @@ class DetectionsModule(BaseModule):
         instead. Returns full detection records.
         """
         logger.debug("Getting detection details for ID(s): %s", ids)
+
+        if malformed := _malformed_composite_ids(ids):
+            return _composite_id_error_response(malformed)
 
         return self._base_get_by_ids(
             operation="PostEntitiesAlertsV2",

@@ -242,6 +242,62 @@ class TestDetectionsModule(TestModules):
         # We should check that the result is empty
         self.assertEqual(result, [])
 
+    def test_get_detection_details_rejects_malformed_composite_ids(self):
+        """Malformed composite IDs are reported without an API call.
+
+        These are the shapes seen in practice when a caller rebuilds a composite ID
+        instead of passing it through: the leading CID dropped, the legacy 'ldt:' scheme
+        glued onto a composite ID, only the trailing detection-id kept, or a different
+        scheme prefix. The API answers all of them with a bare "invalid CID provided",
+        which does not say which part was wrong.
+        """
+        aid = "2ecb1dbbf2464f218dda265fd8740545"
+        cid = "f2e868bf9ca54261ad1af73732192249"
+        tail = "11164974778924-458-484824592"
+        cases = {
+            "cid segment dropped": f"ind:{aid}:{tail}",
+            "ldt glued onto composite": f"ldt:{cid}:ind:{aid}:{tail}",
+            "only the trailing detection-id": "540784113761-10820-177012752",
+            "different scheme prefix": f"cwpp:{cid}:070034dec5fd4b37813e0b00f388ed0c",
+        }
+        for label, bad_id in cases.items():
+            with self.subTest(label):
+                self.mock_client.command.reset_mock()
+
+                result = self.module.get_detection_details([bad_id])
+
+                self.mock_client.command.assert_not_called()
+                self.assertIsInstance(result, dict)
+                self.assertIn("error", result)
+                self.assertIn("expected_format", result)
+                self.assertIn("hint", result)
+                self.assertEqual(result["details"][0]["id"], bad_id)
+
+    def test_get_detection_details_accepts_wellformed_ids(self):
+        """Well-formed IDs reach the API untouched, including unfamiliar-but-valid ones.
+
+        A composite ID for a CID these credentials cannot read is still well formed —
+        the API must be the one to reject it, so a tenant problem is never reported as
+        a formatting problem. The legacy 'ldt:<aid>:<detect_id>' scheme also passes.
+        """
+        cases = [
+            "23819cdb18d64b34933bc100f22d6489:ind:19fd5961834a4327ad5fc8b7f7e0a758:541036844153-10820-180051984",
+            "f2e868bf9ca54261ad1af73732192249:ind:2ecb1dbbf2464f218dda265fd8740545:11164974778924-458-484824592",
+            "ldt:19fd5961834a4327ad5fc8b7f7e0a758:541036844153",
+        ]
+        for good_id in cases:
+            with self.subTest(good_id[:24]):
+                self.mock_client.command.reset_mock()
+                self.mock_client.command.return_value = {
+                    "status_code": 200,
+                    "body": {"resources": [{"composite_id": good_id}]},
+                }
+
+                result = self.module.get_detection_details([good_id])
+
+                self.mock_client.command.assert_called_once()
+                self.assertEqual(result, [{"composite_id": good_id}])
+
     def test_search_detections_include_hidden_false(self):
         """Test searching for detections with include_hidden=False."""
         # Setup mock responses for both API calls
