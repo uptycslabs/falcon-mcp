@@ -124,7 +124,7 @@ class TestHostsModule(TestModules):
         self.assertEqual(result["pagination"]["total"], 2)
 
     def test_search_hosts_error(self):
-        """Test searching for hosts with API error."""
+        """Test that a search-step error returns the error wrapped with the FQL guide."""
         # Setup mock response with error
         mock_response = {
             "status_code": 400,
@@ -135,10 +135,32 @@ class TestHostsModule(TestModules):
         # Call search_hosts
         result = self.module.search_hosts(filter="invalid_filter")
 
-        # Verify result contains error
-        self.assertEqual(len(result), 1)
-        self.assertIn("error", result[0])
-        self.assertIn("details", result[0])
+        # Verify result contains error AND fql_guide
+        self.assertIsInstance(result, dict)
+        self.assertIn("results", result)
+        self.assertIn("fql_guide", result)
+        self.assertIn("hint", result)
+        self.assertEqual(result["filter_used"], "invalid_filter")
+        self.assertIn("error", result["results"][0])
+
+    def test_search_hosts_error_guide_names_the_valid_id_field(self):
+        """A bad-field filter must come back with the guide that documents `device_id`.
+
+        Regression test for the real failure: callers filter on `agent_id`, which the
+        Hosts API rejects with a bare "status code 400". Without the guide attached
+        there is nothing in the response to correct from.
+        """
+        self.mock_client.command.return_value = {
+            "status_code": 400,
+            "body": {"errors": [{"message": "Request failed with status code 400"}]},
+        }
+
+        result = self.module.search_hosts(
+            filter="agent_id:'19fd5961834a4327ad5fc8b7f7e0a758'"
+        )
+
+        self.assertIsInstance(result, dict)
+        self.assertIn("device_id", result["fql_guide"])
 
     def test_search_hosts_no_results(self):
         """Test searching for hosts with no results."""

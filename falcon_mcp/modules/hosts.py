@@ -116,8 +116,14 @@ class HostsModule(BaseModule):
             error_message="Failed to search hosts",
         )
 
+        # Handle search error - return with FQL guide. A 400 here is almost always a bad
+        # filter (an invalid field such as `agent_id` instead of `device_id`, or `AND`
+        # where FQL wants `+`), and the API says only "Request failed with status code
+        # 400". Attaching the guide is the only way the caller learns the valid fields.
         if self._is_error(device_ids):
-            return [device_ids]
+            return self._format_fql_error_response(
+                [device_ids], filter, SEARCH_HOSTS_FQL_DOCUMENTATION
+            )
 
         if not device_ids:
             return self._build_pagination_envelope([], pagination, filter)
