@@ -64,7 +64,10 @@ class TestFirewallModule(TestModules):
         """Test searching firewall rules and fetching full details."""
         query_response = {
             "status_code": 200,
-            "body": {"resources": ["rule-id-1", "rule-id-2"]},
+            "body": {
+                "resources": ["rule-id-1", "rule-id-2"],
+                "meta": {"pagination": {"offset": 0, "limit": 20, "total": 2, "next": "cursor-abc"}},
+            },
         }
         details_response = {
             "status_code": 200,
@@ -80,7 +83,6 @@ class TestFirewallModule(TestModules):
         result = self.module.search_firewall_rules(
             filter="enabled:true",
             limit=20,
-            offset=0,
             sort="modified_on.desc",
             q=None,
             after=None,
@@ -93,15 +95,48 @@ class TestFirewallModule(TestModules):
         self.assertEqual(first_call[0][0], "query_rules")
         self.assertEqual(first_call[1]["parameters"]["filter"], "enabled:true")
         self.assertEqual(first_call[1]["parameters"]["limit"], 20)
-        self.assertEqual(first_call[1]["parameters"]["offset"], 0)
+        self.assertNotIn("offset", first_call[1]["parameters"])
         self.assertEqual(first_call[1]["parameters"]["sort"], "modified_on.desc")
 
         self.assertEqual(second_call[0][0], "get_rules")
         self.assertEqual(second_call[1]["parameters"]["ids"], ["rule-id-1", "rule-id-2"])
-        self.assertEqual(len(result), 2)
+        self.assertIn("results", result)
+        self.assertEqual(len(result["results"]), 2)
+        self.assertEqual(result["pagination"]["total"], 2)
+        self.assertEqual(result["pagination"]["next"], "cursor-abc")
+
+    def test_search_firewall_rules_reorders_to_match_sorted_ids(self):
+        """When get_rules returns rules out of order, the result is reordered
+        to match the sorted ID order from query_rules."""
+        query_response = {
+            "status_code": 200,
+            "body": {"resources": ["rule-id-b", "rule-id-a"]},
+        }
+        details_response = {
+            "status_code": 200,
+            "body": {
+                "resources": [
+                    {"id": "rule-id-a", "name": "Rule A", "platform": "windows"},
+                    {"id": "rule-id-b", "name": "Rule B", "platform": "windows"},
+                ]
+            },
+        }
+        self.mock_client.command.side_effect = [query_response, details_response]
+
+        result = self.module.search_firewall_rules(
+            filter=None,
+            limit=20,
+            sort="modified_on.desc",
+            q=None,
+            after=None,
+        )
+
+        self.assertEqual(len(result["results"]), 2)
+        self.assertEqual(result["results"][0]["id"], "rule-id-b")
+        self.assertEqual(result["results"][1]["id"], "rule-id-a")
 
     def test_search_firewall_rules_empty_with_filter(self):
-        """Test rule search empty results with filter returns FQL guide wrapper."""
+        """Test rule search empty results with filter returns clean empty response."""
         self.mock_client.command.return_value = {
             "status_code": 200,
             "body": {"resources": []},
@@ -110,7 +145,6 @@ class TestFirewallModule(TestModules):
         result = self.module.search_firewall_rules(
             filter="name:'DoesNotExist*'",
             limit=10,
-            offset=None,
             sort=None,
             q=None,
             after=None,
@@ -118,13 +152,18 @@ class TestFirewallModule(TestModules):
 
         self.assertIsInstance(result, dict)
         self.assertEqual(result["results"], [])
-        self.assertIn("fql_guide", result)
+        self.assertIsNone(result["pagination"]["total"])
+        self.assertEqual(result["filter_used"], "name:'DoesNotExist*'")
+        self.assertNotIn("fql_guide", result)
 
     def test_search_firewall_rule_groups_success(self):
         """Test searching firewall rule groups and fetching full details."""
         query_response = {
             "status_code": 200,
-            "body": {"resources": ["group-id-1"]},
+            "body": {
+                "resources": ["group-id-1"],
+                "meta": {"pagination": {"offset": 0, "limit": 10, "total": 1}},
+            },
         }
         details_response = {
             "status_code": 200,
@@ -139,7 +178,6 @@ class TestFirewallModule(TestModules):
         result = self.module.search_firewall_rule_groups(
             filter="enabled:true",
             limit=10,
-            offset=0,
             sort="modified_on.desc",
             q=None,
             after=None,
@@ -148,14 +186,49 @@ class TestFirewallModule(TestModules):
         self.assertEqual(self.mock_client.command.call_count, 2)
         self.assertEqual(self.mock_client.command.call_args_list[0][0][0], "query_rule_groups")
         self.assertEqual(self.mock_client.command.call_args_list[1][0][0], "get_rule_groups")
-        self.assertEqual(len(result), 1)
-        self.assertEqual(result[0]["id"], "group-id-1")
+        self.assertNotIn("offset", self.mock_client.command.call_args_list[0][1]["parameters"])
+        self.assertEqual(len(result["results"]), 1)
+        self.assertEqual(result["results"][0]["id"], "group-id-1")
+        self.assertEqual(result["pagination"]["total"], 1)
+
+    def test_search_firewall_rule_groups_reorders_to_match_sorted_ids(self):
+        """When get_rule_groups returns groups out of order, the result is reordered
+        to match the sorted ID order from query_rule_groups."""
+        query_response = {
+            "status_code": 200,
+            "body": {"resources": ["group-id-b", "group-id-a"]},
+        }
+        details_response = {
+            "status_code": 200,
+            "body": {
+                "resources": [
+                    {"id": "group-id-a", "name": "Group A", "platform": "windows"},
+                    {"id": "group-id-b", "name": "Group B", "platform": "windows"},
+                ]
+            },
+        }
+        self.mock_client.command.side_effect = [query_response, details_response]
+
+        result = self.module.search_firewall_rule_groups(
+            filter=None,
+            limit=10,
+            sort="modified_on.desc",
+            q=None,
+            after=None,
+        )
+
+        self.assertEqual(len(result["results"]), 2)
+        self.assertEqual(result["results"][0]["id"], "group-id-b")
+        self.assertEqual(result["results"][1]["id"], "group-id-a")
 
     def test_search_firewall_policy_rules_success(self):
         """Test searching policy rules and fetching full rule details."""
         query_response = {
             "status_code": 200,
-            "body": {"resources": ["rule-id-10"]},
+            "body": {
+                "resources": ["rule-id-10"],
+                "meta": {"pagination": {"offset": 0, "limit": 10, "total": 1}},
+            },
         }
         details_response = {
             "status_code": 200,
@@ -181,7 +254,39 @@ class TestFirewallModule(TestModules):
         self.assertEqual(first_call[0][0], "query_policy_rules")
         self.assertEqual(first_call[1]["parameters"]["id"], "policy-1")
         self.assertEqual(self.mock_client.command.call_args_list[1][0][0], "get_rules")
-        self.assertEqual(len(result), 1)
+        self.assertEqual(len(result["results"]), 1)
+        self.assertEqual(result["pagination"]["total"], 1)
+
+    def test_search_firewall_policy_rules_reorders_to_match_sorted_ids(self):
+        """When get_rules returns policy rules out of order, the result is reordered
+        to match the sorted ID order from query_policy_rules."""
+        query_response = {
+            "status_code": 200,
+            "body": {"resources": ["rule-id-b", "rule-id-a"]},
+        }
+        details_response = {
+            "status_code": 200,
+            "body": {
+                "resources": [
+                    {"id": "rule-id-a", "name": "Policy Rule A", "platform": "windows"},
+                    {"id": "rule-id-b", "name": "Policy Rule B", "platform": "windows"},
+                ]
+            },
+        }
+        self.mock_client.command.side_effect = [query_response, details_response]
+
+        result = self.module.search_firewall_policy_rules(
+            policy_id="policy-1",
+            filter=None,
+            limit=10,
+            offset=0,
+            sort="modified_on.desc",
+            q=None,
+        )
+
+        self.assertEqual(len(result["results"]), 2)
+        self.assertEqual(result["results"][0]["id"], "rule-id-b")
+        self.assertEqual(result["results"][1]["id"], "rule-id-a")
 
     def test_create_firewall_rule_group_success(self):
         """Test creating a firewall rule group with convenience fields."""
@@ -292,7 +397,6 @@ class TestFirewallModule(TestModules):
         result = self.module.search_firewall_rules(
             filter="bad_field:'value'",
             limit=10,
-            offset=None,
             sort=None,
             q=None,
             after=None,
@@ -313,7 +417,6 @@ class TestFirewallModule(TestModules):
         result = self.module.search_firewall_rules(
             filter=None,
             limit=10,
-            offset=None,
             sort=None,
             q=None,
             after=None,
@@ -338,7 +441,6 @@ class TestFirewallModule(TestModules):
         result = self.module.search_firewall_rules(
             filter="enabled:true",
             limit=10,
-            offset=None,
             sort=None,
             q=None,
             after=None,
@@ -358,7 +460,6 @@ class TestFirewallModule(TestModules):
         result = self.module.search_firewall_rule_groups(
             filter="bad_field:'value'",
             limit=10,
-            offset=None,
             sort=None,
             q=None,
             after=None,

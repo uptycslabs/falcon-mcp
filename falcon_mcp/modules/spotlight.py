@@ -56,18 +56,14 @@ class SpotlightModule(BaseModule):
         self,
         filter: str | None = Field(
             default=None,
-            description="FQL Syntax formatted string used to limit the results. IMPORTANT: use the `falcon://spotlight/vulnerabilities/fql-guide` resource when building this filter parameter.",
-            examples={"status:'open'", "cve.severity:'HIGH'"},
+            description="FQL filter expression. See `falcon://spotlight/vulnerabilities/fql-guide` for syntax.",
+            examples=["status:'open'", "cve.severity:'HIGH'"],
         ),
         limit: int = Field(
             default=10,
             ge=1,
             le=5000,
             description="Maximum number of results to return. (Max: 5000, Default: 10)",
-        ),
-        offset: int | None = Field(
-            default=None,
-            description="Starting index of overall result set from which to return results.",
         ),
         sort: str | None = Field(
             default=None,
@@ -84,22 +80,24 @@ class SpotlightModule(BaseModule):
 
                 Examples: 'created_timestamp|desc', 'updated_timestamp|desc', 'closed_timestamp|asc'
             """).strip(),
-            examples={
+            examples=[
                 "created_timestamp|desc",
                 "updated_timestamp|desc",
                 "closed_timestamp|asc",
-            },
+            ],
         ),
         after: str | None = Field(
             default=None,
             description="A pagination token used with the limit parameter to manage pagination of results. On your first request, don't provide an after token. On subsequent requests, provide the after token from the previous response to continue from that place in the results.",
         ),
-        facet: str | None = Field(
+        facet: str | list[str] | None = Field(
             default=None,
             description=dedent("""
-                Important: Use only one value!
+                Select one or more detail blocks to be returned for each vulnerability.
 
-                Select various detail blocks to be returned for each vulnerability.
+                Accepts a single value (e.g. 'cve') or a list of values
+                (e.g. ['cve', 'host_info', 'remediation']) to retrieve multiple
+                detail blocks in a single request.
 
                 Supported values:
                 • host_info: Include host/asset information and context
@@ -110,22 +108,24 @@ class SpotlightModule(BaseModule):
                 Use host_info when you need asset context, remediation for fix information,
                 cve for detailed vulnerability scoring, and evaluation_logic for assessment details.
 
-                Examples: 'host_info', 'cve', 'remediation'
+                Examples: 'cve', ['cve', 'host_info'], ['cve', 'host_info', 'remediation', 'evaluation_logic']
             """).strip(),
-            examples={"host_info", "cve", "remediation", "evaluation_logic"},
+            examples=["cve", ["cve", "host_info"], ["cve", "host_info", "remediation", "evaluation_logic"]],
         ),
-    ) -> list[dict[str, Any]]:
+    ) -> list[dict[str, Any]] | dict[str, Any]:
         """Search for vulnerabilities in your CrowdStrike environment.
 
-        IMPORTANT: You must use the `falcon://spotlight/vulnerabilities/fql-guide` resource when you need to use the `filter` parameter.
-        This resource contains the guide on how to build the FQL `filter` parameter for the `falcon_search_vulnerabilities` tool.
+        Use this to find vulnerabilities by CVE severity, status, host, or remediation
+        state. Consult falcon://spotlight/vulnerabilities/fql-guide before constructing
+        filter expressions. Returns vulnerability details including CVE info, host context,
+        and remediation guidance (based on facet selection).
+        Responses include `pagination.total` (the total number of records matching the filter, or null when the API does not report a count) — use it to answer "how many" questions. For cursor-based paging, use `pagination.next` as the `after` parameter on the next call.
         """
-        vulnerabilities = self._base_search_api_call(
+        vulnerabilities, pagination = self._base_search_with_meta(
             operation="combinedQueryVulnerabilities",
             search_params={
                 "filter": filter,
                 "limit": limit,
-                "offset": offset,
                 "sort": sort,
                 "after": after,
                 "facet": facet,
@@ -133,9 +133,7 @@ class SpotlightModule(BaseModule):
             error_message="Failed to search vulnerabilities",
         )
 
-        # If handle_api_response returns an error dict instead of a list,
-        # it means there was an error, so we return it wrapped in a list
         if self._is_error(vulnerabilities):
             return [vulnerabilities]
 
-        return vulnerabilities
+        return self._build_pagination_envelope(vulnerabilities or [], pagination, filter)

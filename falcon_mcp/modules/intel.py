@@ -4,6 +4,7 @@ Intel module for Falcon MCP Server
 This module provides tools for accessing and analyzing CrowdStrike Falcon intelligence data.
 """
 
+import json
 from typing import Any
 
 from mcp.server import FastMCP
@@ -64,21 +65,30 @@ class IntelModule(BaseModule):
         search_actors_fql_resource = TextResource(
             uri=AnyUrl("falcon://intel/actors/fql-guide"),
             name="falcon_search_actors_fql_guide",
-            description="Contains the guide for the `filter` param of the `falcon_search_actors` tool.",
+            description=(
+                "Contains the guide for the `filter` param of the "
+                "`falcon_search_actors` tool."
+            ),
             text=QUERY_ACTOR_ENTITIES_FQL_DOCUMENTATION,
         )
 
         search_indicators_fql_resource = TextResource(
             uri=AnyUrl("falcon://intel/indicators/fql-guide"),
             name="falcon_search_indicators_fql_guide",
-            description="Contains the guide for the `filter` param of the `falcon_search_indicators` tool.",
+            description=(
+                "Contains the guide for the `filter` param of the "
+                "`falcon_search_indicators` tool."
+            ),
             text=QUERY_INDICATOR_ENTITIES_FQL_DOCUMENTATION,
         )
 
         search_reports_fql_resource = TextResource(
             uri=AnyUrl("falcon://intel/reports/fql-guide"),
             name="falcon_search_reports_fql_guide",
-            description="Contains the guide for the `filter` param of the `falcon_search_reports` tool.",
+            description=(
+                "Contains the guide for the `filter` param of the "
+                "`falcon_search_reports` tool."
+            ),
             text=QUERY_REPORT_ENTITIES_FQL_DOCUMENTATION,
         )
 
@@ -99,7 +109,9 @@ class IntelModule(BaseModule):
         self,
         filter: str | None = Field(
             default=None,
-            description="FQL query expression that should be used to limit the results. IMPORTANT: use the `falcon://intel/actors/fql-guide` resource when building this filter parameter.",
+            description=(
+                "FQL filter expression. See `falcon://intel/actors/fql-guide` for syntax."
+            ),
         ),
         limit: int = Field(
             default=10,
@@ -115,7 +127,12 @@ class IntelModule(BaseModule):
         ),
         sort: str | None = Field(
             default=None,
-            description="The field and direction to sort results on. The format is {field}|{asc/desc}. Valid values include: name, target_countries, target_industries, type, created_date, last_activity_date and last_modified_date. Ex: created_date|desc",
+            description=(
+                "The field and direction to sort results on. The format is "
+                "{field}|{asc/desc}. Valid values include: name, target_countries, "
+                "target_industries, type, created_date, last_activity_date and "
+                "last_modified_date. Ex: created_date|desc"
+            ),
             examples={"created_date|desc"},
         ),
         q: str | None = Field(
@@ -123,13 +140,15 @@ class IntelModule(BaseModule):
             description="Free text search across all indexed fields.",
             examples={"BEAR"},
         ),
-    ) -> list[dict[str, Any]]:
+    ) -> list[dict[str, Any]] | dict[str, Any]:
         """Research threat actors and adversary groups tracked by CrowdStrike intelligence.
 
-        IMPORTANT: You must use the `falcon://intel/actors/fql-guide` resource when you need to use the `filter` parameter.
-        This resource contains the guide on how to build the FQL `filter` parameter for the `falcon_search_actors` tool.
+        Use this to search actors by name, target countries/industries, or activity dates.
+        Consult falcon://intel/actors/fql-guide before constructing filter expressions.
+        Returns full actor profiles including aliases, motivations, and targeting details.
+        Responses include `pagination.total` (the total number of records matching the filter, or null when the API does not report a count) — use it to answer "how many" questions.
         """
-        api_response = self._base_search_api_call(
+        api_response, pagination = self._base_search_with_meta(
             operation="QueryIntelActorEntities",
             search_params={
                 "filter": filter,
@@ -144,13 +163,16 @@ class IntelModule(BaseModule):
         if self._is_error(api_response):
             return [api_response]
 
-        return api_response
+        return self._build_pagination_envelope(api_response or [], pagination, filter)
 
     def query_indicator_entities(
         self,
         filter: str | None = Field(
             default=None,
-            description="FQL query expression that should be used to limit the results. IMPORTANT: use the `falcon://intel/indicators/fql-guide` resource when building this filter parameter.",
+            description=(
+                "FQL filter expression. See `falcon://intel/indicators/fql-guide` "
+                "for syntax."
+            ),
         ),
         limit: int = Field(
             default=10,
@@ -164,7 +186,11 @@ class IntelModule(BaseModule):
         ),
         sort: str | None = Field(
             default=None,
-            description="The field and direction to sort results on. The format is {field}|{asc/desc}. Valid values are: id, indicator, type, published_date, last_updated, and _marker. Ex: published_date|desc",
+            description=(
+                "The field and direction to sort results on. The format is "
+                "{field}|{asc/desc}. Valid values are: id, indicator, type, "
+                "published_date, last_updated, and _marker. Ex: published_date|desc"
+            ),
             examples={"published_date|desc"},
         ),
         q: str | None = Field(
@@ -173,19 +199,27 @@ class IntelModule(BaseModule):
         ),
         include_deleted: bool = Field(
             default=False,
-            description="Flag indicating if both published and deleted indicators should be returned.",
+            description=(
+                "Flag indicating if both published and deleted indicators "
+                "should be returned."
+            ),
         ),
         include_relations: bool = Field(
             default=False,
-            description="Flag indicating if related indicators should be returned.",
+            description=(
+                "Flag indicating if related indicators should be returned."
+            ),
         ),
-    ) -> list[dict[str, Any]]:
-        """Search for threat indicators and indicators of compromise (IOCs) from CrowdStrike intelligence.
+    ) -> list[dict[str, Any]] | dict[str, Any]:
+        """Search for threat indicators and IOCs from CrowdStrike intelligence.
 
-        IMPORTANT: You must use the `falcon://intel/indicators/fql-guide` resource when you need to use the `filter` parameter.
-        This resource contains the guide on how to build the FQL `filter` parameter for the `falcon_search_indicators` tool.
+        Use this to find indicators by type, publish date, malware family, or threat actor
+        association. Consult falcon://intel/indicators/fql-guide before constructing filter
+        expressions. Returns full indicator details including labels, relations, and kill
+        chain stage.
+        Responses include `pagination.total` (the total number of records matching the filter, or null when the API does not report a count) — use it to answer "how many" questions.
         """
-        api_response = self._base_search_api_call(
+        api_response, pagination = self._base_search_with_meta(
             operation="QueryIntelIndicatorEntities",
             search_params={
                 "filter": filter,
@@ -202,13 +236,15 @@ class IntelModule(BaseModule):
         if self._is_error(api_response):
             return [api_response]
 
-        return api_response
+        return self._build_pagination_envelope(api_response or [], pagination, filter)
 
     def query_report_entities(
         self,
         filter: str | None = Field(
             default=None,
-            description="FQL query expression that should be used to limit the results. IMPORTANT: use the `falcon://intel/reports/fql-guide` resource when building this filter parameter.",
+            description=(
+                "FQL filter expression. See `falcon://intel/reports/fql-guide` for syntax."
+            ),
         ),
         limit: int = Field(
             default=10,
@@ -222,24 +258,27 @@ class IntelModule(BaseModule):
         ),
         sort: str | None = Field(
             default=None,
-            description="The field and direction to sort results on in the format of: {field}.{asc}or {field}.{desc}. Valid values include: name, target_countries, target_industries, type, created_date, last_modified_date. Ex: created_date|desc",
+            description=(
+                "The field and direction to sort results on in the format of: "
+                "{field}.{asc}or {field}.{desc}. Valid values include: name, "
+                "target_countries, target_industries, type, created_date, "
+                "last_modified_date. Ex: created_date|desc"
+            ),
             examples={"created_date|desc"},
         ),
         q: str | None = Field(
             default=None,
             description="Free text search across all indexed fields.",
         ),
-    ) -> list[dict[str, Any]]:
-        """Access CrowdStrike intelligence publications and threat reports.
+    ) -> list[dict[str, Any]] | dict[str, Any]:
+        """Search CrowdStrike intelligence publications and threat reports.
 
-        This tool returns comprehensive intelligence report details based on your search criteria.
-        Use this when you need to find CrowdStrike intelligence publications matching specific conditions.
-        For guidance on building FQL filters, use the `falcon://intel/reports/fql-guide` resource.
-
-        IMPORTANT: You must use the `falcon://intel/reports/fql-guide` resource when you need to use the `filter` parameter.
-        This resource contains the guide on how to build the FQL `filter` parameter for the `falcon_search_reports` tool.
+        Use this to find reports by name, target industry, threat type, or publication date.
+        Consult falcon://intel/reports/fql-guide before constructing filter expressions.
+        Returns full report metadata including title, description, and target details.
+        Responses include `pagination.total` (the total number of records matching the filter, or null when the API does not report a count) — use it to answer "how many" questions.
         """
-        api_response = self._base_search_api_call(
+        api_response, pagination = self._base_search_with_meta(
             operation="QueryIntelReportEntities",
             search_params={
                 "filter": filter,
@@ -251,12 +290,10 @@ class IntelModule(BaseModule):
             error_message="Failed to search reports",
         )
 
-        # If handle_api_response returns an error dict instead of a list,
-        # it means there was an error, so we return it wrapped in a list
         if self._is_error(api_response):
             return [api_response]
 
-        return api_response
+        return self._build_pagination_envelope(api_response or [], pagination, filter)
 
     def get_mitre_report(
         self,
@@ -271,14 +308,11 @@ class IntelModule(BaseModule):
             examples={"json", "csv"},
         ),
     ) -> list[dict[str, Any]] | str:
-        """Generate MITRE ATT&CK report for a given threat actor.
+        """Generate a MITRE ATT&CK report for a given threat actor.
 
-        Provides detailed MITRE ATT&CK tactics, techniques, and procedures (TTPs)
-        report associated with a specific threat actor tracked.
-
-        Args:
-            actor: Pass the actor name (string) or numeric actor ID (string).
-            format: Report format. Accepted options: 'csv' or 'json'. Defaults to 'json'.
+        Accepts an actor name (e.g., 'WARP PANDA') or numeric ID. Returns MITRE ATT&CK
+        tactics, techniques, and procedures (TTPs) for the actor. JSON format returns a
+        parsed list of dicts; CSV format returns raw CSV text.
         """
 
         # Check if the actor parameter looks like an ID (numeric) or a name
@@ -317,7 +351,10 @@ class IntelModule(BaseModule):
             if not actor_id or actor_id == 'None':
                 return [{
                     "error": "Invalid actor data",
-                    "message": f"Found actor '{selected_actor.get('name', 'Unknown')}' but missing ID field",
+                    "message": (
+                        f"Found actor '{selected_actor.get('name', 'Unknown')}'"
+                        " but missing ID field"
+                    ),
                     "actor_data": selected_actor
                 }]
 
@@ -338,6 +375,16 @@ class IntelModule(BaseModule):
         if self._is_error(api_response):
             logger.debug("API response is an error, wrapping in list")
             return [api_response]
+
+        # Parse JSON format into Python objects; keep CSV as raw string
+        if format.lower() == "json" and isinstance(api_response, str):
+            stripped = api_response.strip()
+            if not stripped or stripped == "null":
+                return []
+            try:
+                return json.loads(stripped)
+            except json.JSONDecodeError as e:
+                return [{"error": "JSON parse failure", "message": str(e)}]
 
         return api_response
 

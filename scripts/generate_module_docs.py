@@ -1,7 +1,7 @@
 """Generate Starlight documentation pages from falcon_mcp module source code.
 
 Introspects module classes, tool methods, and resource definitions to produce
-markdown files for docs-site/src/content/docs/modules/.
+markdown files for docs/modules/.
 
 Usage:
     uv run python scripts/generate_module_docs.py
@@ -17,23 +17,34 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from falcon_mcp.common.api_scopes import API_SCOPE_REQUIREMENTS
-
 # Ensure project root is on sys.path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-OUTPUT_DIR = PROJECT_ROOT / "docs-site" / "src" / "content" / "docs" / "modules"
+from falcon_mcp.common.api_scopes import API_SCOPE_REQUIREMENTS  # noqa: E402
+
+OUTPUT_DIR = PROJECT_ROOT / "docs" / "modules"
+SITE_BASE_PATH = "/falcon-mcp"
 
 # Module display metadata — overrides only.
 # Titles and descriptions are auto-derived from module docstrings.
 # Add entries here when you need a custom title, slug, or description.
 MODULE_METADATA: dict[str, dict[str, Any]] = {
+    "cases": {
+        "title": "Case Management",
+        "slug": "cases",
+    },
     "cloud": {
         "title": "Cloud Security",
     },
     "customioa": {
         "slug": "custom-ioa",
+    },
+    "dataprotection": {
+        "slug": "data-protection",
+    },
+    "hostgroups": {
+        "slug": "host-groups",
     },
     "idp": {
         "title": "Identity Protection",
@@ -54,6 +65,50 @@ MODULE_METADATA: dict[str, dict[str, Any]] = {
 
 # Natural language prompt examples for each tool, shown in generated docs
 TOOL_EXAMPLES: dict[str, list[str]] = {
+    # Cases
+    "falcon_search_cases": [
+        "Show me any open cases with high severity or above",
+        "What cases have been created in the last 24 hours?",
+    ],
+    "falcon_get_cases": [
+        "Pull up the full details on that case",
+    ],
+    "falcon_create_case": [
+        "Create a critical case called 'Suspicious lateral movement from WORKSTATION-42'",
+        "Open a high-severity case for the credential theft alerts and attach them as evidence",
+    ],
+    "falcon_update_case": [
+        "Set that case to in_progress and assign it to the analyst",
+        "Close the case — investigation is complete",
+    ],
+    "falcon_add_case_alert_evidence": [
+        "Attach these detection alerts to the case",
+    ],
+    "falcon_add_case_event_evidence": [
+        "Add these NGSIEM event IDs to the case as evidence",
+    ],
+    "falcon_manage_case_tags": [
+        "Tag that case with 'ransomware' and 'escalated'",
+        "Remove the 'escalated' tag from that case",
+    ],
+    "falcon_list_case_templates": [
+        "What case templates are available?",
+    ],
+    # Correlation Rules
+    "falcon_search_correlation_rules": [
+        "Show me all active high-severity correlation rules",
+        "Find correlation rules covering lateral movement tactics",
+    ],
+    "falcon_create_correlation_rule": [
+        "Create a correlation rule using this CQL query: #event_simpleName=ProcessRollup2 | CommandLine=*-EncodedCommand*",
+    ],
+    "falcon_update_correlation_rule": [
+        "Disable the correlation rule — set its status to inactive",
+        "Update the rule severity to critical (90)",
+    ],
+    "falcon_delete_correlation_rules": [
+        "Delete the test correlation rule we created",
+    ],
     # Cloud
     "falcon_search_kubernetes_containers": [
         "Find all containers running in AWS clusters",
@@ -67,6 +122,37 @@ TOOL_EXAMPLES: dict[str, list[str]] = {
     ],
     "falcon_search_cspm_assets": [
         "Find all AWS EC2 instances in my cloud inventory",
+    ],
+    "falcon_search_iom_findings": [
+        "Show me critical open CSPM misconfiguration findings in AWS",
+        "Find IOM findings for S3 buckets with public access",
+        "What CSPM IOM findings are suppressed as accepted risk?",
+    ],
+    "falcon_search_cspm_suppression_rules": [
+        "List all CSPM IOM suppression rules and their reasons",
+        "Show me which CSPM findings are being suppressed and why",
+    ],
+    "falcon_create_cspm_suppression_rule": [
+        "Create a CSPM suppression rule for the S3 encryption finding in the dev account as accepted risk",
+        "Suppress the IAM password policy IOM finding as a false positive, expiring in 30 days",
+    ],
+    "falcon_delete_cspm_suppression_rules": [
+        "Delete CSPM suppression rule abc-123",
+        "Remove the CSPM IOM suppression rule for the S3 public access finding",
+    ],
+    "falcon_search_cloud_risks": [
+        "Show me all open critical cloud risks in AWS",
+        "Which account has the most unresolved critical risks?",
+        "What new cloud risks appeared in the last 7 days?",
+        "Show me risks for the production cloud group",
+        "What cloud risks have been suppressed and why?",
+    ],
+    "falcon_search_cloud_groups": [
+        "What cloud groups are configured in my environment?",
+        "List all cloud groups tagged as production",
+    ],
+    "falcon_get_cloud_groups": [
+        "Get the details for cloud group abc-123",
     ],
     # Custom IOA
     "falcon_search_ioa_rule_groups": [
@@ -96,6 +182,19 @@ TOOL_EXAMPLES: dict[str, list[str]] = {
     "falcon_delete_ioa_rules": [
         "Delete rules from IOA group abc123",
     ],
+    # Data Protection
+    "falcon_search_data_protection_classifications": [
+        "What Data Protection classifications are configured in my environment?",
+        "Show me the classification rules that detect credit card data",
+    ],
+    "falcon_search_data_protection_policies": [
+        "List all enabled Windows Data Protection policies",
+        "Show me the Mac Data Protection policies and their precedence order",
+    ],
+    "falcon_search_data_protection_content_patterns": [
+        "What predefined content patterns are available for Data Protection?",
+        "Show me custom Data Protection regex patterns in the Financial category",
+    ],
     # Detections
     "falcon_search_detections": [
         "Show me new high severity detections from the last 7 days",
@@ -103,6 +202,19 @@ TOOL_EXAMPLES: dict[str, list[str]] = {
     ],
     "falcon_get_detection_details": [
         "Get me the details for this detection",
+    ],
+    "falcon_aggregate_alerts": [
+        "How many detections do we have by severity?",
+        "What are the top 10 hosts by alert count this week?",
+        "Show me alert volume per day for the last 30 days",
+        "How many distinct hosts have critical alerts?",
+    ],
+    "falcon_update_detections": [
+        "Mark detection abc123 as in_progress",
+        "Assign detection abc123 to analyst@example.com",
+        "Close these detections and add a comment: resolved via playbook",
+        "Mark detection abc123 as a true positive and close it",
+        "Remove all fc/ prefixed tags from this detection",
     ],
     # Discover
     "falcon_search_applications": [
@@ -136,6 +248,30 @@ TOOL_EXAMPLES: dict[str, list[str]] = {
     "falcon_get_host_details": [
         "Get the full details for host device abc123",
     ],
+    # Host Groups
+    "falcon_search_host_groups": [
+        "Show me all static host groups",
+        "Find host groups created in the last 30 days",
+    ],
+    "falcon_search_host_group_members": [
+        "List the Windows hosts in host group abc123",
+        "Show me the members of the Production Servers group",
+    ],
+    "falcon_create_host_group": [
+        "Create a static host group called 'Critical Servers'",
+        "Create a dynamic host group for all Windows hosts",
+    ],
+    "falcon_update_host_group": [
+        "Rename host group abc123 to 'Decommissioned'",
+        "Update the assignment rule for the dynamic Windows group",
+    ],
+    "falcon_delete_host_groups": [
+        "Delete host group abc123",
+    ],
+    "falcon_perform_host_group_action": [
+        "Add the hosts matching platform_name Windows to group abc123",
+        "Remove host device xyz from host group abc123",
+    ],
     # Identity Protection
     "falcon_idp_investigate_entity": [
         "Investigate user john.doe@company.com and show their risk assessment",
@@ -155,6 +291,24 @@ TOOL_EXAMPLES: dict[str, list[str]] = {
     "falcon_get_mitre_report": [
         "Generate MITRE ATT&CK report for FANCY BEAR",
     ],
+    # Exclusions
+    "falcon_search_exclusions": [
+        "Show me my most recent IOA and machine learning exclusions",
+        "List sensor visibility exclusions created in the last 7 days",
+    ],
+    "falcon_create_exclusion": [
+        "Create an ML exclusion for /tmp/foo.sh applied to all hosts",
+        "Add a sensor visibility exclusion for C:\\Temp\\* on the Workstations group",
+    ],
+    "falcon_update_exclusion": [
+        "Update IOA exclusion abc123 to also match a new command line regex",
+    ],
+    "falcon_delete_exclusions": [
+        "Delete the certificate exclusion with ID abc123",
+    ],
+    "falcon_get_certificate_details": [
+        "Look up the signing certificate for SHA256 3dd9a...",
+    ],
     # IOC
     "falcon_search_iocs": [
         "Find all active domain IOCs",
@@ -172,6 +326,68 @@ TOOL_EXAMPLES: dict[str, list[str]] = {
     "falcon_search_ngsiem": [
         "Run this CQL query for the last 24 hours: #event_simpleName=ProcessRollup2",
         "Search NGSIEM for DNS events from January 2025",
+    ],
+    # Policies
+    "falcon_search_policies": [
+        "List all firewall policies",
+        "Show enabled sensor update policies for Windows",
+        "Find prevention policies whose name contains 'default'",
+    ],
+    "falcon_search_policy_members": [
+        "What hosts are assigned to firewall policy 1a2b3c?",
+    ],
+    "falcon_create_policy": [
+        "Create a disabled firewall policy named 'Test FW' for Windows",
+    ],
+    "falcon_update_policy": [
+        "Rename prevention policy 1a2b3c to 'Servers - Strict'",
+    ],
+    "falcon_delete_policies": [
+        "Delete firewall policy 1a2b3c",
+    ],
+    "falcon_perform_policy_action": [
+        "Disable prevention policy 1a2b3c",
+        "Add host group 9z8y7x to sensor update policy 1a2b3c",
+    ],
+    "falcon_set_policy_precedence": [
+        "Set the precedence order of these Windows prevention policies: 1a2b3c, 4d5e6f, 7g8h9i",
+    ],
+    # Quarantine
+    "falcon_search_quarantined_files": [
+        "Show me quarantined files on host SE-DAO-WIN10-CO",
+        "Find quarantined files for user badguy updated in the last 7 days",
+        "Search for quarantined files with SHA256 starting with 3dd9",
+    ],
+    "falcon_preview_quarantine_actions": [
+        "Preview how many quarantined files can be released vs deleted",
+        "Preview quarantine action impact for state quarantined on host SE-DAO-WIN10-CO",
+    ],
+    "falcon_update_quarantined_files": [
+        "Release quarantine record abc123",
+        "Release all quarantined files for user badguy",
+    ],
+    "falcon_delete_quarantined_files": [
+        "Delete quarantine records for host SE-DAO-WIN10-CO",
+        "Delete quarantine record abc123",
+    ],
+    # Recon
+    "falcon_search_recon_notifications": [
+        "Show me recon alerts from the past 7 days",
+        "Show me new recon alerts with high priority",
+        "Find recon notifications for domain monitoring rules",
+        "Show typosquatting recon alerts",
+        "Find leaked credential notifications from stealer logs",
+    ],
+    "falcon_search_recon_rules": [
+        "List all active Recon monitoring rules",
+        "Show typosquatting monitoring rules",
+        "Find Recon rules with breach monitoring enabled",
+        "List high priority domain monitoring rules",
+    ],
+    "falcon_search_recon_exposed_data_records": [
+        "Find exposed credentials for example.com",
+        "Show leaked credentials from the past 7 days",
+        "Find exposed data records for a specific notification",
     ],
     # Scheduled Reports
     "falcon_search_scheduled_reports": [
@@ -256,6 +472,14 @@ TOOL_EXAMPLES: dict[str, list[str]] = {
         "Find all active RTR sessions",
         "Show me RTR sessions for host abc123",
     ],
+    "falcon_search_rtr_audit_sessions": [
+        "Show me RTR audit activity from the last 7 days",
+        "Who used RTR against host BRR-WB-LIB-22?",
+    ],
+    "falcon_aggregate_rtr_sessions": [
+        "Summarize RTR sessions by command for the last 30 days",
+        "Which hosts have the most RTR activity this week?",
+    ],
     "falcon_get_rtr_session_details": [
         "Get details for RTR session abc123",
     ],
@@ -268,6 +492,10 @@ TOOL_EXAMPLES: dict[str, list[str]] = {
     "falcon_execute_rtr_read_only_command": [
         "Run 'ps' on this host via RTR",
         "List running processes on host xyz",
+    ],
+    "falcon_run_rtr_read_only_command_and_wait": [
+        "Run 'ps' via RTR and return the output when it completes",
+        "Check C:\\Windows\\win.ini on this RTR session and wait for the result",
     ],
     "falcon_check_rtr_command_status": [
         "Check the status of RTR command request abc123",
@@ -432,6 +660,81 @@ def extract_tool_info(method: Any) -> dict[str, Any]:
     }
 
 
+def extract_registered_tool_names(module_cls: type) -> dict[str, str]:
+    """Extract method-to-tool-name mappings from register_tools.
+
+    Registered MCP tool names can differ from Python method names. The docs
+    should show the actual tool names exposed to MCP clients.
+    """
+    try:
+        source = inspect.getsource(module_cls.register_tools)  # type: ignore[attr-defined]
+    except (AttributeError, TypeError):
+        return {}
+
+    registered: dict[str, str] = {}
+
+    # Find each _add_tool( block and collect its full call by tracking parens.
+    for match in re.finditer(r"self\._add_tool\(", source):
+        start = match.end()
+        depth = 1
+        pos = start
+        while pos < len(source) and depth > 0:
+            if source[pos] == "(":
+                depth += 1
+            elif source[pos] == ")":
+                depth -= 1
+            pos += 1
+        block = source[start : pos - 1]
+
+        method_match = re.search(r"method=self\.(\w+)", block)
+        name_match = re.search(r'name=["\']([^"\']+)["\']', block)
+        if method_match and name_match:
+            registered[method_match.group(1)] = name_match.group(1)
+
+    return registered
+
+
+def _extract_kwarg_string(block: str, kwarg: str) -> str:
+    """Extract a string-valued kwarg, joining adjacent/parenthesized literals.
+
+    Handles both `description="..."` single literals and reflowed
+    `description=(\n    "part one "\n    "part two"\n)` concatenations, which
+    Python joins into one string at runtime.
+    """
+    m = re.search(rf"{kwarg}\s*=\s*", block)
+    if not m:
+        return ""
+    rest = block[m.end() :]
+
+    # Parenthesized group: capture everything up to the matching close paren,
+    # then join every quoted literal inside it.
+    if rest.startswith("("):
+        depth = 0
+        for i, ch in enumerate(rest):
+            if ch == "(":
+                depth += 1
+            elif ch == ")":
+                depth -= 1
+                if depth == 0:
+                    inner = rest[1:i]
+                    break
+        else:
+            inner = rest
+        pairs = re.findall(r'"([^"]*)"|\'([^\']*)\'', inner)
+        return "".join(dq or sq for dq, sq in pairs)
+
+    # Bare value: join only the leading run of adjacent string literals
+    # (implicit concatenation), stopping at the first non-literal token so we
+    # don't swallow later kwargs' strings.
+    literals: list[str] = []
+    scan = rest
+    lit = re.compile(r'^\s*(?:"([^"]*)"|\'([^\']*)\')')
+    while match := lit.match(scan):
+        literals.append(match.group(1) if match.group(1) is not None else match.group(2))
+        scan = scan[match.end() :]
+    return "".join(literals)
+
+
 def extract_resource_info(module_cls: type) -> list[dict[str, str]]:
     """Extract resource URIs and descriptions by inspecting register_resources."""
     try:
@@ -456,14 +759,14 @@ def extract_resource_info(module_cls: type) -> list[dict[str, str]]:
 
         uri_m = re.search(r'uri=AnyUrl\(["\']([^"\']+)["\']\)', block)
         name_m = re.search(r'name=["\']([^"\']+)["\']', block)
-        desc_m = re.search(r'description=["\']([^"\']+)["\']', block)
+        description = _extract_kwarg_string(block, "description")
 
         if uri_m:
             resources.append(
                 {
                     "uri": uri_m.group(1),
                     "name": name_m.group(1) if name_m else "",
-                    "description": desc_m.group(1) if desc_m else "",
+                    "description": description,
                 }
             )
 
@@ -503,6 +806,7 @@ def generate_module_page(module_key: str, module_cls: type, auto_title: str, aut
     # Extract tools
     tools = []
     tool_annotations = extract_tool_annotations(module_cls)
+    registered_tool_names = extract_registered_tool_names(module_cls)
 
     for attr_name in dir(module_cls):
         method = getattr(module_cls, attr_name)
@@ -511,17 +815,16 @@ def generate_module_page(module_key: str, module_cls: type, auto_title: str, aut
             and not attr_name.startswith("_")
             and attr_name not in ("register_tools", "register_resources")
         ):
-            # Check if this method is registered as a tool
-            source = inspect.getsource(module_cls.register_tools)  # type: ignore[attr-defined]
-            if attr_name in source:
+            registered_name = registered_tool_names.get(attr_name)
+            if registered_name:
                 info = extract_tool_info(method)
-                info["name"] = f"falcon_{attr_name}"
-                info["raw_name"] = attr_name
+                info["name"] = f"falcon_{registered_name}"
+                info["raw_name"] = registered_name
                 info["method"] = method
 
                 # Get annotations
-                if attr_name in tool_annotations:
-                    info["annotations"] = tool_annotations[attr_name]
+                if registered_name in tool_annotations:
+                    info["annotations"] = tool_annotations[registered_name]
                 else:
                     info["annotations"] = {
                         "readOnlyHint": True,
@@ -542,12 +845,11 @@ def generate_module_page(module_key: str, module_cls: type, auto_title: str, aut
 
     # Build markdown
     lines = []
-    lines.append("---")
-    lines.append(f"title: {title}")
-    lines.append(f"description: {description}")
-    lines.append("sidebar:")
-    lines.append("  order: 10")
-    lines.append("---")
+    lines.append(f"<!-- meta:title {title} -->")
+    lines.append(f"<!-- meta:description {description} -->")
+    lines.append("<!-- meta:section modules -->")
+    lines.append("<!-- meta:link-base /falcon-mcp/ -->")
+    lines.append("<!-- frontmatter:sidebar order:10 -->")
     lines.append("")
     lines.append(description)
     lines.append("")
@@ -573,14 +875,12 @@ def generate_module_page(module_key: str, module_cls: type, auto_title: str, aut
 
             # Admonition for mutating/destructive tools
             if destructive:
-                lines.append(":::caution")
-                lines.append("This tool performs destructive operations.")
-                lines.append(":::")
+                lines.append("> [!CAUTION]")
+                lines.append("> This tool performs destructive operations.")
                 lines.append("")
             elif not read_only:
-                lines.append(":::note")
-                lines.append("This tool modifies data.")
-                lines.append(":::")
+                lines.append("> [!NOTE]")
+                lines.append("> This tool modifies data.")
                 lines.append("")
 
             # Per-tool scopes
@@ -618,12 +918,13 @@ def generate_module_page(module_key: str, module_cls: type, auto_title: str, aut
 def generate_overview_page(modules: dict[str, dict[str, Any]]) -> str:
     """Generate the modules overview page with summary table."""
     lines = []
-    lines.append("---")
-    lines.append("title: Module Overview")
-    lines.append("description: Overview of all available Falcon MCP modules with API scopes.")
-    lines.append("sidebar:")
-    lines.append("  order: 0")
-    lines.append("---")
+    lines.append("<!-- meta:title Module Overview -->")
+    lines.append(
+        "<!-- meta:description Overview of all available Falcon MCP modules with API scopes. -->"
+    )
+    lines.append("<!-- meta:section modules -->")
+    lines.append("<!-- meta:link-base /falcon-mcp/ -->")
+    lines.append("<!-- frontmatter:sidebar order:0 -->")
     lines.append("")
     lines.append(
         "The Falcon MCP Server provides the following modules. Each module requires specific CrowdStrike API scopes."
@@ -641,7 +942,7 @@ def generate_overview_page(modules: dict[str, dict[str, Any]]) -> str:
         scopes = ", ".join(f"`{s}`" for s in scopes_list)
         fallback_desc = modules[key]["auto_description"] or f"{title} module for CrowdStrike Falcon."
         desc = meta.get("description", fallback_desc)
-        lines.append(f"| [{title}](/falcon-mcp/modules/{slug}/) | {scopes} | {desc} |")
+        lines.append(f"| [{title}]({SITE_BASE_PATH}/modules/{slug}/) | {scopes} | {desc} |")
 
     lines.append("")
     return "\n".join(lines)

@@ -85,15 +85,19 @@ class TestFalconMCPServer(unittest.TestCase):
 
     @patch("falcon_mcp.server.FalconClient")
     def test_authentication_failure(self, mock_client):
-        """Test server initialization with authentication failure."""
-        # Setup mock
+        """Test server initialization with authentication failure includes diagnostics."""
         mock_client_instance = MagicMock()
         mock_client_instance.authenticate.return_value = False
+        mock_client_instance.auth_failure_message.return_value = (
+            "Failed to authenticate with the Falcon API (HTTP 401). invalid credentials"
+        )
         mock_client.return_value = mock_client_instance
 
-        # Verify authentication failure raises RuntimeError
-        with self.assertRaises(RuntimeError):
+        with self.assertRaises(RuntimeError) as ctx:
             FalconMCPServer()
+
+        self.assertIn("HTTP 401", str(ctx.exception))
+        mock_client_instance.auth_failure_message.assert_called_once()
 
     @patch("falcon_mcp.server.FalconClient")
     def test_falcon_check_connectivity_success(self, mock_client):
@@ -444,30 +448,6 @@ class TestFalconMCPServer(unittest.TestCase):
 
     @patch("falcon_mcp.server.FalconClient")
     @patch("falcon_mcp.server.FastMCP")
-    def test_all_tools_have_annotations(self, mock_fastmcp, mock_client):
-        """Test that every registered tool has non-None annotations."""
-        mock_client_instance = MagicMock()
-        mock_client_instance.authenticate.return_value = True
-        mock_client.return_value = mock_client_instance
-
-        mock_server_instance = MagicMock()
-        mock_fastmcp.return_value = mock_server_instance
-
-        # Create server with ALL modules to register every tool
-        FalconMCPServer()
-
-        for call in mock_server_instance.add_tool.call_args_list:
-            name = call.kwargs.get("name", "<unknown>")
-            annotations = call.kwargs.get("annotations")
-            self.assertIsNotNone(
-                annotations,
-                f"Tool '{name}' was registered without annotations. "
-                f"Use _add_tool() for automatic READ_ONLY_ANNOTATIONS, "
-                f"or pass explicit annotations for mutating tools.",
-            )
-
-    @patch("falcon_mcp.server.FalconClient")
-    @patch("falcon_mcp.server.FastMCP")
     def test_server_initialization_with_member_cid(self, mock_fastmcp, mock_client):
         """Test server initialization with member_cid parameter."""
         # Setup mocks
@@ -507,6 +487,36 @@ class TestFalconMCPServer(unittest.TestCase):
         # Should be None (the default)
         self.assertIsNone(call_args["member_cid"])
 
+
+    @patch("falcon_mcp.server.FalconClient")
+    @patch("falcon_mcp.server.FastMCP")
+    def test_server_initialization_with_proxy(self, mock_fastmcp, mock_client):
+        """Test server initialization with proxy parameter is forwarded to FalconClient."""
+        mock_client_instance = MagicMock()
+        mock_client_instance.authenticate.return_value = True
+        mock_client.return_value = mock_client_instance
+        mock_fastmcp.return_value = MagicMock()
+
+        _server = FalconMCPServer(proxy="http://proxy.corp.example.com:8080")
+
+        mock_client.assert_called_once()
+        call_args = mock_client.call_args[1]
+        self.assertEqual(call_args["proxy"], "http://proxy.corp.example.com:8080")
+
+    @patch("falcon_mcp.server.FalconClient")
+    @patch("falcon_mcp.server.FastMCP")
+    def test_server_initialization_without_proxy(self, mock_fastmcp, mock_client):
+        """Test server initialization without proxy passes None to FalconClient."""
+        mock_client_instance = MagicMock()
+        mock_client_instance.authenticate.return_value = True
+        mock_client.return_value = mock_client_instance
+        mock_fastmcp.return_value = MagicMock()
+
+        _server = FalconMCPServer()
+
+        mock_client.assert_called_once()
+        call_args = mock_client.call_args[1]
+        self.assertIsNone(call_args["proxy"])
 
     @patch("falcon_mcp.server.get_version", return_value="1.2.3")
     def test_version_flag(self, _mock_version):

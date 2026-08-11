@@ -4,35 +4,6 @@ Contains Detections resources.
 
 from falcon_mcp.common.utils import generate_md_table
 
-# Concise FQL syntax for embedding in tool parameter descriptions
-EMBEDDED_FQL_SYNTAX = """FQL filter string for querying detections.
-
-SYNTAX:
-- Equals: field:'value'
-- Not equals: field:!'value'
-- Comparison: field:>50, field:>=50, field:<50, field:<=50
-- Contains (case-insensitive): field:~'partial'
-- Wildcard: field:'prefix*', field:'*suffix'
-
-COMBINING:
-- AND (all must match): field1:'value1'+field2:'value2'
-- OR (any can match): field:'value1',field:'value2'
-- Grouping: (status:'new',status:'in_progress')+severity_name:'High'
-
-COMMON FIELDS:
-- status: 'new', 'in_progress', 'closed', 'reopened'
-- severity_name: 'Informational', 'Low', 'Medium', 'High', 'Critical'
-- product: 'epp', 'idp', 'xdr', 'overwatch'
-- device.hostname: Hostname contains string
-- created_timestamp: ISO 8601 format (e.g., '2025-01-14T00:00:00Z')
-
-EXAMPLES:
-- New high/critical alerts: status:'new'+(severity_name:'High',severity_name:'Critical')
-- Last 24h endpoint detections: created_timestamp:>'2025-01-14T00:00:00Z'+product:'epp'
-- Hostname pattern: device.hostname:'DC*'+status:'new'
-- Unassigned critical: assigned_to_name:!'*'+severity_name:'Critical'
-"""
-
 # List of tuples containing filter options data: (name, type, description)
 SEARCH_DETECTIONS_FQL_FILTERS = [
     (
@@ -369,10 +340,11 @@ SEARCH_DETECTIONS_FQL_FILTERS = [
         "tags",
         "Array",
         """
-        Contains a separated list of FalconGroupingTags
-        and SensorGroupingTags (array field).
-        Ex: ["fc/offering/falcon_complete",
-        "fc/exclusion/pre-epp-migration", "fc/exclusion/nonlive"]
+        Contains FalconGroupingTags, SensorGroupingTags, and resolution tags (array field).
+        Resolution tags added via the falcon_update_detections add_tags param: true_positive, false_positive, ignored.
+        Use to filter by resolution: tags:'true_positive'
+        Exact match only — wildcards and ~ are not supported on array fields.
+        Ex: true_positive, false_positive, ignored, fc/offering/falcon_complete
         """
     ),
     (
@@ -888,6 +860,7 @@ field_name:[operator]'value'
 === WILDCARDS ===
 ✅ **String & Number fields**: field_name:'pattern*' (prefix), field_name:'*pattern' (suffix), field_name:'*pattern*' (contains)
 ❌ **Timestamp fields**: Not supported (causes errors)
+❌ **Array fields**: Only exact-match ('value') supported; wildcards and ~ are not valid on Array fields (e.g. use tags:'true_positive', not tags:'true_positive*' or tags:~'positive')
 ⚠️ **Number wildcards**: Require quotes: pattern_id:'123*'
 
 === COMBINING ===
@@ -939,7 +912,9 @@ Examples: 'severity.desc', 'timestamp.desc'
 • Severity (by range): severity:>=80 (Critical+) | severity:>=60 (High+) | severity:>=40 (Medium+) | severity:>=20 (Low+)
 • Product: product:'epp' | product:'idp' | product:'xdr' | product:'overwatch' (see field table for all)
 • Assignment: assigned_to_name:!'*' (unassigned) | assigned_to_name:'user.name'
+• Resolution tags: tags:'true_positive' | tags:'false_positive' | tags:'ignored'
 • Timestamps: created_timestamp:>'2025-01-01T00:00:00Z' | created_timestamp:>='date1'+created_timestamp:<='date2'
+  Relative dates supported: timestamp:>'now-24h' | timestamp:>'now-7d' | timestamp:>'now-30d' (lowercase 'now', quoted)
 • Wildcards: name:'EICAR*' | description:'*credential*' | agent_id:'77d11725*' | pattern_id:'301*'
 • Combinations: status:'new'+severity_name:'High'+product:'epp' | status:'new'+severity:>=70+product:'epp' | product:'epp',product:'xdr'
 
@@ -1013,4 +988,52 @@ assigned_to_name:!'*'+severity_name:!'Informational'
 
 # All unassigned alerts except informational (numeric approach)
 assigned_to_name:!'*'+severity:>=20
+
+=== falcon_aggregate_alerts AGGREGATION FIELDS ===
+
+The `filter` syntax above applies unchanged to falcon_aggregate_alerts, where it narrows
+which alerts are counted. The `field` parameter, which chooses what to group by, accepts a
+different and narrower set of fields than `filter` does. These fields are verified
+aggregatable:
+
+Classification: severity_name, severity, status, tactic, technique, tactic_id,
+  technique_id, objective, product, pattern_id, scenario, type, name, display_name,
+  confidence, resolution, global_prevalence
+Device: device.hostname, device.platform_name, device.os_version,
+  device.product_type_desc, platform, hostname, agent_id, cid
+Assignment: assigned_to_name, assigned_to_uid, tags, data_domains, source_products,
+  source_vendors, email_sent, show_in_ui
+Process/file: filename, filepath, cmdline, sha256, md5, user_name, alleged_filetype,
+  ioc_type, ioc_value, local_process_id, parent_details.filename,
+  grandparent_details.filename, child_process_ids, triggering_process_graph_id
+Time: timestamp, created_timestamp, updated_timestamp, crawled_timestamp,
+  seconds_to_triaged, seconds_to_resolved
+Correlation: aggregate_id, poly_id, falcon_host_link, comment, description
+
+An unsupported aggregation field returns an empty result rather than an error, so a field
+absent from this list cannot be distinguished from a genuine zero count.
+
+Bucket ordering uses the pipe form only — `_count|desc`, `_count|asc`, `_key|asc`,
+`_key|desc`. The dot form used by search sorts (`timestamp.desc`) is rejected with a 400.
+
+Three aggregation types need a companion argument: `date_histogram` requires `interval`,
+`date_range` requires `date_ranges`, and `range` requires `ranges`. This applies to nested
+specs passed via `sub_aggregates` as well.
+
+Aggregation examples:
+
+# Alerts per severity, most common first
+field=severity_name, type=terms, sort=_count|desc
+
+# Busiest hosts among new critical alerts
+field=device.hostname, type=terms, size=10, filter=status:'new'+severity_name:'Critical'
+
+# Daily alert volume for the last week
+field=timestamp, type=date_histogram, interval=day, filter=timestamp:>'now-7d'
+
+# Distinct hosts that have alerts
+field=device.hostname, type=cardinality
+
+# Unassigned alerts counted under an explicit label
+field=assigned_to_name, type=terms, missing=Unassigned
 """

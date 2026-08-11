@@ -27,7 +27,6 @@ class TestFirewallIntegration(BaseIntegrationTest):
             self.module.search_firewall_rules,
             filter=None,
             limit=1,
-            offset=0,
             sort=None,
             q=None,
             after=None,
@@ -40,7 +39,6 @@ class TestFirewallIntegration(BaseIntegrationTest):
             self.module.search_firewall_rules,
             filter=None,
             limit=5,
-            offset=0,
             sort=None,
             q=None,
             after=None,
@@ -52,7 +50,7 @@ class TestFirewallIntegration(BaseIntegrationTest):
         if len(result) > 0:
             self.assert_search_returns_details(
                 result,
-                expected_fields=["id", "platform"],
+                expected_fields=["id", "platform_ids"],
                 context="search_firewall_rules",
             )
 
@@ -62,7 +60,6 @@ class TestFirewallIntegration(BaseIntegrationTest):
             self.module.search_firewall_rules,
             filter="enabled:true",
             limit=3,
-            offset=0,
             sort="modified_on.desc",
             q=None,
             after=None,
@@ -80,7 +77,6 @@ class TestFirewallIntegration(BaseIntegrationTest):
             self.module.search_firewall_rule_groups,
             filter=None,
             limit=5,
-            offset=0,
             sort=None,
             q=None,
             after=None,
@@ -104,7 +100,6 @@ class TestFirewallIntegration(BaseIntegrationTest):
             self.module.search_firewall_rule_groups,
             filter="enabled:true",
             limit=3,
-            offset=0,
             sort="modified_on.desc",
             q=None,
             after=None,

@@ -23,12 +23,16 @@ from falcon_mcp.common.auth import (
     strip_trailing_slash_middleware,
 )
 from falcon_mcp.common.logging import configure_logging, get_logger
-from falcon_mcp.modules.base import READ_ONLY_ANNOTATIONS
+from falcon_mcp.modules.base import READ_ONLY_ANNOTATIONS, offload_to_thread
 
 logger = get_logger(__name__)
 
 # Type alias for transport options
 TransportType = Literal["stdio", "sse", "streamable-http"]
+
+# Hosts that keep the server reachable only from the local machine. Binding to
+# anything else exposes it on the network, where an unauthenticated endpoint is a risk.
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 
 
 class FalconMCPServer:
@@ -47,6 +51,8 @@ class FalconMCPServer:
         host: str = "127.0.0.1",
         port: int = 8000,
         member_cid: str | None = None,
+        proxy: str | None = None,
+        dynamic: bool = False,
     ):
         """Initialize the Falcon MCP server.
 
@@ -62,6 +68,7 @@ class FalconMCPServer:
             host: Host to bind to for HTTP transports (default: 127.0.0.1)
             port: Port to listen on for HTTP transports (default: 8000)
             member_cid: Child CID for Flight Control (MSSP) support (defaults to FALCON_MEMBER_CID env var)
+            proxy: HTTP/HTTPS proxy URL for outbound Falcon API connections (defaults to FALCON_PROXY_URL env var)
         """
         # Store configuration
         self.base_url = base_url
@@ -71,6 +78,7 @@ class FalconMCPServer:
         self.api_key = api_key
         self.host = host
         self.port = port
+        self.dynamic = dynamic
 
         self.enabled_modules = enabled_modules or set(registry.get_module_names())
 
@@ -86,12 +94,14 @@ class FalconMCPServer:
             client_id=client_id,
             client_secret=client_secret,
             member_cid=member_cid,
+            proxy=proxy,
         )
 
         # Authenticate with the Falcon API
         if not self.falcon_client.authenticate():
-            logger.error("Failed to authenticate with the Falcon API")
-            raise RuntimeError("Failed to authenticate with the Falcon API")
+            msg = self.falcon_client.auth_failure_message()
+            logger.error(msg)
+            raise RuntimeError(msg)
 
         # Initialize the MCP server
         self.server = FastMCP(
@@ -128,7 +138,7 @@ class FalconMCPServer:
         module_word = "module" if module_count == 1 else "modules"
 
         logger.info(
-            "Falcon MCP v%s — %d %s, %d %s, %d %s",
+            "Falcon MCP v%s — %d %s, %d %s, %d %s%s",
             get_version(),
             module_count,
             module_word,
@@ -136,6 +146,7 @@ class FalconMCPServer:
             tool_word,
             resource_count,
             resource_word,
+            " (dynamic mode)" if self.dynamic else "",
         )
 
     def _register_tools(self) -> int:
@@ -144,32 +155,44 @@ class FalconMCPServer:
         Returns:
             int: Number of tools registered
         """
-        # Register core tools directly
+        # falcon_list_enabled_modules is always registered — dynamic mode's no-results
+        # hint references it by name, and it's useful in both modes.
         self.server.add_tool(
-            self.falcon_check_connectivity,
-            name="falcon_check_connectivity",
-            annotations=READ_ONLY_ANNOTATIONS,
-        )
-
-        self.server.add_tool(
-            self.list_enabled_modules,
+            offload_to_thread(self.list_enabled_modules),
             name="falcon_list_enabled_modules",
             annotations=READ_ONLY_ANNOTATIONS,
+            structured_output=False,
         )
 
-        self.server.add_tool(
-            self.list_modules,
-            name="falcon_list_modules",
-            annotations=READ_ONLY_ANNOTATIONS,
-        )
+        if self.dynamic:
+            # Dynamic mode: expose only the discovery/execution meta-tools plus
+            # falcon_list_enabled_modules above (3 tools total) so the context window
+            # stays minimal.
+            from falcon_mcp.dynamic import DynamicMode
 
-        tool_count = 3  # the tools added above
+            dynamic_mode = DynamicMode(self.modules, self.server)
+            dynamic_mode.register()
+            tool_count = 3  # falcon_list_enabled_modules + falcon_search_tools + falcon_execute_tool
+        else:
+            # Normal mode: register all three core tools and then each module's tools.
+            self.server.add_tool(
+                offload_to_thread(self.falcon_check_connectivity),
+                name="falcon_check_connectivity",
+                annotations=READ_ONLY_ANNOTATIONS,
+                structured_output=False,
+            )
 
-        # Register tools from modules
-        for module in self.modules.values():
-            module.register_tools(self.server)
+            self.server.add_tool(
+                offload_to_thread(self.list_modules),
+                name="falcon_list_modules",
+                annotations=READ_ONLY_ANNOTATIONS,
+                structured_output=False,
+            )
 
-        tool_count += sum(len(getattr(m, "tools", [])) for m in self.modules.values())
+            for module in self.modules.values():
+                module.register_tools(self.server)
+
+            tool_count = 3 + sum(len(getattr(m, "tools", [])) for m in self.modules.values())
 
         return tool_count
 
@@ -190,6 +213,12 @@ class FalconMCPServer:
     def falcon_check_connectivity(self) -> dict[str, bool]:
         """Check connectivity to the Falcon API."""
         try:
+            # Deliberately bypasses FalconClient._token_lock: this is a stateless
+            # probe (stateful=False) that never mutates the shared token, so it
+            # cannot corrupt a concurrent refresh. It may fire its own throwaway
+            # /oauth2/token POST alongside a real refresh, which is acceptable for
+            # a diagnostic tool — the lock guards the shared-state refresh path,
+            # not every possible token request.
             result = self.falcon_client.client._login_handler(stateful=False)
             return {"connected": result.get("status_code") == 201}
         except Exception:
@@ -219,6 +248,14 @@ class FalconMCPServer:
         if self.api_key:
             app = auth_middleware(app, self.api_key)
             logger.info("API key authentication enabled")
+        elif self.host not in _LOOPBACK_HOSTS:
+            logger.warning(
+                "Server is binding to %s:%d without --api-key: the endpoint is reachable "
+                "on the network and has no authentication. Set --api-key "
+                "(or FALCON_MCP_API_KEY) when binding beyond loopback.",
+                self.host,
+                self.port,
+            )
         uvicorn.run(
             app,
             host=self.host,
@@ -370,6 +407,23 @@ def parse_args() -> argparse.Namespace:
         help="Child CID for Flight Control (MSSP) support (env: FALCON_MEMBER_CID)",
     )
 
+    # Proxy configuration
+    parser.add_argument(
+        "--proxy",
+        default=os.environ.get("FALCON_PROXY_URL"),
+        help="HTTP/HTTPS proxy URL for outbound Falcon API connections (env: FALCON_PROXY_URL). "
+        "Example: http://proxy.corp.example.com:8080",
+    )
+
+    # Dynamic mode
+    parser.add_argument(
+        "--dynamic",
+        action="store_true",
+        default=os.environ.get("FALCON_MCP_DYNAMIC", "").lower() == "true",
+        help="Enable dynamic mode: exposes 3 tools (list-modules + search + execute) instead of "
+        "all module tools (env: FALCON_MCP_DYNAMIC)",
+    )
+
     return parser.parse_args()
 
 
@@ -393,6 +447,8 @@ def main() -> None:
             host=args.host,
             port=args.port,
             member_cid=args.member_cid,
+            proxy=args.proxy,
+            dynamic=args.dynamic,
         )
         logger.info("Starting server with %s transport", args.transport)
         server.run(args.transport)

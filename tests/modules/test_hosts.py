@@ -35,7 +35,10 @@ class TestHostsModule(TestModules):
         # Setup mock responses for both API calls
         query_response = {
             "status_code": 200,
-            "body": {"resources": ["device1", "device2"]},
+            "body": {
+                "resources": ["device1", "device2"],
+                "meta": {"pagination": {"offset": 0, "limit": 100, "total": 2}},
+            },
         }
         details_response = {
             "status_code": 200,
@@ -60,18 +63,22 @@ class TestHostsModule(TestModules):
         self.assertEqual(second_call[0][0], "PostDeviceDetailsV2")
         self.assertEqual(second_call[1]["body"]["ids"], ["device1", "device2"])
 
-        # Verify result structure
-        self.assertIsInstance(result, list)
-        self.assertEqual(len(result), 2)
-        self.assertEqual(result[0]["device_id"], "device1")
-        self.assertEqual(result[1]["device_id"], "device2")
+        # Verify result envelope
+        self.assertIn("results", result)
+        self.assertEqual(len(result["results"]), 2)
+        self.assertEqual(result["results"][0]["device_id"], "device1")
+        self.assertEqual(result["results"][1]["device_id"], "device2")
+        self.assertEqual(result["pagination"]["total"], 2)
 
     def test_search_hosts_with_details(self):
         """Test searching for hosts with details."""
         # Setup mock responses
         query_response = {
             "status_code": 200,
-            "body": {"resources": ["device1", "device2"]},
+            "body": {
+                "resources": ["device1", "device2"],
+                "meta": {"pagination": {"offset": 0, "limit": 100, "total": 2}},
+            },
         }
         details_response = {
             "status_code": 200,
@@ -109,23 +116,15 @@ class TestHostsModule(TestModules):
             "PostDeviceDetailsV2", body={"ids": ["device1", "device2"]}
         )
 
-        # Verify result
-        expected_result = [
-            {
-                "device_id": "device1",
-                "hostname": "TEST-HOST-1",
-                "platform_name": "Windows",
-            },
-            {
-                "device_id": "device2",
-                "hostname": "TEST-HOST-2",
-                "platform_name": "Linux",
-            },
-        ]
-        self.assertEqual(result, expected_result)
+        # Verify result envelope
+        self.assertIn("results", result)
+        self.assertEqual(len(result["results"]), 2)
+        self.assertEqual(result["results"][0]["device_id"], "device1")
+        self.assertEqual(result["results"][1]["device_id"], "device2")
+        self.assertEqual(result["pagination"]["total"], 2)
 
     def test_search_hosts_error(self):
-        """Test searching for hosts with API error."""
+        """Test that a search-step error returns the error wrapped with the FQL guide."""
         # Setup mock response with error
         mock_response = {
             "status_code": 400,
@@ -136,22 +135,46 @@ class TestHostsModule(TestModules):
         # Call search_hosts
         result = self.module.search_hosts(filter="invalid_filter")
 
-        # Verify result contains error
-        self.assertEqual(len(result), 1)
-        self.assertIn("error", result[0])
-        self.assertIn("details", result[0])
+        # Verify result contains error AND fql_guide
+        self.assertIsInstance(result, dict)
+        self.assertIn("results", result)
+        self.assertIn("fql_guide", result)
+        self.assertIn("hint", result)
+        self.assertEqual(result["filter_used"], "invalid_filter")
+        self.assertIn("error", result["results"][0])
+
+    def test_search_hosts_error_guide_names_the_valid_id_field(self):
+        """A bad-field filter must come back with the guide that documents `device_id`.
+
+        Regression test for the real failure: callers filter on `agent_id`, which the
+        Hosts API rejects with a bare "status code 400". Without the guide attached
+        there is nothing in the response to correct from.
+        """
+        self.mock_client.command.return_value = {
+            "status_code": 400,
+            "body": {"errors": [{"message": "Request failed with status code 400"}]},
+        }
+
+        result = self.module.search_hosts(
+            filter="agent_id:'19fd5961834a4327ad5fc8b7f7e0a758'"
+        )
+
+        self.assertIsInstance(result, dict)
+        self.assertIn("device_id", result["fql_guide"])
 
     def test_search_hosts_no_results(self):
         """Test searching for hosts with no results."""
         # Setup mock response with empty resources
-        mock_response = {"status_code": 200, "body": {"resources": []}}
+        mock_response = {"status_code": 200, "body": {"resources": [], "meta": {"pagination": {"offset": 0, "limit": 100, "total": 0}}}}
         self.mock_client.command.return_value = mock_response
 
         # Call search_hosts
         result = self.module.search_hosts(filter="hostname:'NONEXISTENT'")
 
-        # Verify result is empty list
-        self.assertEqual(result, [])
+        # Verify result is empty envelope
+        self.assertIsInstance(result, dict)
+        self.assertEqual(result["results"], [])
+        self.assertIn("pagination", result)
         # Only one API call should be made (QueryDevicesByFilter)
         self.assertEqual(self.mock_client.command.call_count, 1)
 
@@ -178,7 +201,38 @@ class TestHostsModule(TestModules):
         )
 
         # Verify result
-        self.assertEqual(result, [])
+        self.assertIsInstance(result, dict)
+        self.assertEqual(result["results"], [])
+        self.assertIn("pagination", result)
+
+    def test_search_hosts_reorders_to_match_sorted_ids(self):
+        """When PostDeviceDetailsV2 returns devices out of order, the result is
+        reordered to match the sorted ID order from QueryDevicesByFilter.
+
+        Live API validated: the details endpoint preserves order today, so this
+        guards against regressions and future endpoint behavior changes. Entities
+        carry their ID in the ``device_id`` field.
+        """
+        query_response = {
+            "status_code": 200,
+            "body": {"resources": ["device2", "device1"]},
+        }
+        details_response = {
+            "status_code": 200,
+            "body": {
+                "resources": [
+                    {"device_id": "device1", "hostname": "alpha"},
+                    {"device_id": "device2", "hostname": "bravo"},
+                ]
+            },
+        }
+        self.mock_client.command.side_effect = [query_response, details_response]
+
+        result = self.module.search_hosts(sort="last_seen.desc")
+
+        self.assertEqual(len(result["results"]), 2)
+        self.assertEqual(result["results"][0]["device_id"], "device2")
+        self.assertEqual(result["results"][1]["device_id"], "device1")
 
     def test_get_host_details(self):
         """Test getting host details."""
@@ -303,7 +357,10 @@ class TestHostsModule(TestModules):
         # Setup mock responses
         query_response = {
             "status_code": 200,
-            "body": {"resources": ["win-host-1", "win-host-2"]},
+            "body": {
+                "resources": ["win-host-1", "win-host-2"],
+                "meta": {"pagination": {"offset": 0, "limit": 100, "total": 2}},
+            },
         }
         details_response = {
             "status_code": 200,
@@ -327,10 +384,10 @@ class TestHostsModule(TestModules):
         # Call search_hosts
         result = self.module.search_hosts(filter="platform_name:'Windows'")
 
-        # Verify result
-        self.assertEqual(len(result), 2)
-        self.assertEqual(result[0]["platform_name"], "Windows")
-        self.assertEqual(result[1]["platform_name"], "Windows")
+        # Verify result envelope
+        self.assertEqual(len(result["results"]), 2)
+        self.assertEqual(result["results"][0]["platform_name"], "Windows")
+        self.assertEqual(result["results"][1]["platform_name"], "Windows")
 
         # Verify filter was applied correctly
         first_call = self.mock_client.command.call_args_list[0]
@@ -341,7 +398,13 @@ class TestHostsModule(TestModules):
     def test_search_hosts_linux_platform(self):
         """Test searching for Linux hosts."""
         # Setup mock responses
-        query_response = {"status_code": 200, "body": {"resources": ["linux-host-1"]}}
+        query_response = {
+            "status_code": 200,
+            "body": {
+                "resources": ["linux-host-1"],
+                "meta": {"pagination": {"offset": 0, "limit": 100, "total": 1}},
+            },
+        }
         details_response = {
             "status_code": 200,
             "body": {
@@ -359,9 +422,9 @@ class TestHostsModule(TestModules):
         # Call search_hosts
         result = self.module.search_hosts(filter="platform_name:'Linux'")
 
-        # Verify result
-        self.assertEqual(len(result), 1)
-        self.assertEqual(result[0]["platform_name"], "Linux")
+        # Verify result envelope
+        self.assertEqual(len(result["results"]), 1)
+        self.assertEqual(result["results"][0]["platform_name"], "Linux")
 
         # Verify filter was applied correctly
         first_call = self.mock_client.command.call_args_list[0]
@@ -370,14 +433,14 @@ class TestHostsModule(TestModules):
     def test_search_hosts_mac_platform_no_results(self):
         """Test searching for Mac hosts with no results."""
         # Setup mock response with empty resources
-        mock_response = {"status_code": 200, "body": {"resources": []}}
+        mock_response = {"status_code": 200, "body": {"resources": [], "meta": {"pagination": {"offset": 0, "limit": 100, "total": 0}}}}
         self.mock_client.command.return_value = mock_response
 
         # Call search_hosts
         result = self.module.search_hosts(filter="platform_name:'Mac'")
 
-        # Verify result
-        self.assertEqual(len(result), 0)
+        # Verify result envelope
+        self.assertEqual(len(result["results"]), 0)
 
         # Verify filter was applied correctly
         first_call = self.mock_client.command.call_args_list[0]
