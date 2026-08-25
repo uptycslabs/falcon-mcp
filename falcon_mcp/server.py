@@ -15,7 +15,13 @@ from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP
 
 from falcon_mcp import registry
-from falcon_mcp.client import FalconClient, get_version
+from falcon_mcp.client import (
+    FalconClient,
+    get_version,
+    multi_tenant_enabled,
+    request_tenant_client,
+    set_tenant_client_defaults,
+)
 from falcon_mcp.common.auth import (
     ASGIApp,
     auth_middleware,
@@ -53,6 +59,7 @@ class FalconMCPServer:
         member_cid: str | None = None,
         proxy: str | None = None,
         dynamic: bool = False,
+        multi_tenant: bool | None = None,
     ):
         """Initialize the Falcon MCP server.
 
@@ -68,6 +75,9 @@ class FalconMCPServer:
             host: Host to bind to for HTTP transports (default: 127.0.0.1)
             port: Port to listen on for HTTP transports (default: 8000)
             member_cid: Child CID for Flight Control (MSSP) support (defaults to FALCON_MEMBER_CID env var)
+            multi_tenant: Serve many tenants from one process, taking credentials from each
+                request instead of the environment (defaults to FALCON_MCP_MULTI_TENANT env var).
+                HTTP transports only.
             proxy: HTTP/HTTPS proxy URL for outbound Falcon API connections (defaults to FALCON_PROXY_URL env var)
         """
         # Store configuration
@@ -86,22 +96,66 @@ class FalconMCPServer:
         configure_logging(debug=self.debug)
         logger.info("Initializing Falcon MCP Server")
 
-        # Initialize the Falcon client
-        self.falcon_client = FalconClient(
-            base_url=self.base_url,
-            debug=self.debug,
-            user_agent_comment=self.user_agent_comment,
-            client_id=client_id,
-            client_secret=client_secret,
-            member_cid=member_cid,
-            proxy=proxy,
+        self.multi_tenant = (
+            multi_tenant_enabled() if multi_tenant is None else multi_tenant
         )
 
-        # Authenticate with the Falcon API
-        if not self.falcon_client.authenticate():
-            msg = self.falcon_client.auth_failure_message()
-            logger.error(msg)
-            raise RuntimeError(msg)
+        if self.multi_tenant:
+            # The process holds no credentials: each request carries its own bearer
+            # token and region, resolved per tool call by BaseModule.client. There is
+            # deliberately no process client to fall back to, so a request without a
+            # tenant context fails instead of borrowing another tenant's credentials.
+            #
+            # Credentials being present at all is fatal rather than ignored: FalconPy
+            # prefers an explicit credential pair over an injected token, so a stray
+            # FALCON_CLIENT_ID in the environment would silently serve every tenant
+            # with that one identity — a cross-tenant data leak with no error.
+            present = [
+                name
+                for name, value in (
+                    ("FALCON_CLIENT_ID", client_id or os.environ.get("FALCON_CLIENT_ID")),
+                    (
+                        "FALCON_CLIENT_SECRET",
+                        client_secret or os.environ.get("FALCON_CLIENT_SECRET"),
+                    ),
+                )
+                if value
+            ]
+            if present:
+                raise RuntimeError(
+                    f"Multi-tenant mode cannot start while {' and '.join(present)} "
+                    "is set. FalconPy prefers an explicit credential pair over a "
+                    "per-request token, so every tenant would be served with these "
+                    "credentials instead of their own. Unset them, or drop "
+                    "--multi-tenant to run single-tenant."
+                )
+            # Credentials come per request, but transport settings do not — carry
+            # the server's own so an egress proxy or debug flag is not silently
+            # dropped from every tenant call.
+            set_tenant_client_defaults(
+                debug=self.debug,
+                user_agent_comment=self.user_agent_comment,
+                proxy=proxy or os.environ.get("FALCON_PROXY_URL"),
+            )
+            self.falcon_client = None
+            logger.info("Multi-tenant mode: credentials resolved per request")
+        else:
+            # Initialize the Falcon client
+            self.falcon_client = FalconClient(
+                base_url=self.base_url,
+                debug=self.debug,
+                user_agent_comment=self.user_agent_comment,
+                client_id=client_id,
+                client_secret=client_secret,
+                member_cid=member_cid,
+                proxy=proxy,
+            )
+
+            # Authenticate with the Falcon API
+            if not self.falcon_client.authenticate():
+                msg = self.falcon_client.auth_failure_message()
+                logger.error(msg)
+                raise RuntimeError(msg)
 
         # Initialize the MCP server
         self.server = FastMCP(
@@ -213,6 +267,19 @@ class FalconMCPServer:
     def falcon_check_connectivity(self) -> dict[str, bool]:
         """Check connectivity to the Falcon API."""
         try:
+            if self.multi_tenant:
+                # No credentials to log in with — the request brought a token that
+                # someone else minted. Probe with a cheap authenticated call and
+                # judge the token, not the scopes: 401 means the token is bad,
+                # while 200 and 403 both prove we reached Falcon and authenticated.
+                response = request_tenant_client().command(
+                    "QueryDevicesByFilter", parameters={"limit": 1}
+                )
+                return {"connected": response.get("status_code") in (200, 403)}
+
+            if self.falcon_client is None:  # pragma: no cover - single-tenant invariant
+                return {"connected": False}
+
             # Deliberately bypasses FalconClient._token_lock: this is a stateless
             # probe (stateful=False) that never mutates the shared token, so it
             # cannot corrupt a concurrent refresh. It may fire its own throwaway
@@ -268,7 +335,18 @@ class FalconMCPServer:
 
         Args:
             transport: Transport protocol to use ("stdio", "sse", or "streamable-http")
+
+        Raises:
+            RuntimeError: if multi-tenant mode is combined with stdio, which has no
+                per-request context to carry credentials.
         """
+        if self.multi_tenant and transport != "streamable-http":
+            raise RuntimeError(
+                f"Multi-tenant mode requires the streamable-http transport, got "
+                f"{transport!r}. stdio has no per-request context for credentials to "
+                "arrive on, and sse delivers tool results to whichever session opened "
+                "the stream — which can hand one tenant's data to another."
+            )
         if transport in ("streamable-http", "sse"):
             logger.info("Starting %s server on %s:%d", transport, self.host, self.port)
             app_method = (
@@ -424,6 +502,16 @@ def parse_args() -> argparse.Namespace:
         "all module tools (env: FALCON_MCP_DYNAMIC)",
     )
 
+    # Multi-tenant serving
+    parser.add_argument(
+        "--multi-tenant",
+        action="store_true",
+        default=multi_tenant_enabled(),
+        help="Serve multiple tenants from one process. The server holds no credentials; each "
+        "request must carry 'Authorization: Bearer <token>' and 'X-Falcon-Base-Url'. "
+        "Requires --transport streamable-http (env: FALCON_MCP_MULTI_TENANT)",
+    )
+
     return parser.parse_args()
 
 
@@ -449,6 +537,7 @@ def main() -> None:
             member_cid=args.member_cid,
             proxy=args.proxy,
             dynamic=args.dynamic,
+            multi_tenant=args.multi_tenant,
         )
         logger.info("Starting server with %s transport", args.transport)
         server.run(args.transport)
