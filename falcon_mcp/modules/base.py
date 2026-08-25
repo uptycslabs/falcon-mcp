@@ -14,7 +14,7 @@ from mcp import Resource
 from mcp.server import FastMCP
 from mcp.types import ToolAnnotations
 
-from falcon_mcp.client import FalconClient
+from falcon_mcp.client import FalconClient, request_tenant_client
 from falcon_mcp.common.errors import _format_error_response, handle_api_response
 from falcon_mcp.common.logging import get_logger
 from falcon_mcp.common.utils import filter_none_values, prepare_api_parameters
@@ -84,15 +84,37 @@ def offload_to_thread(method: Callable[..., Any]) -> Callable[..., Any]:
 class BaseModule(ABC):
     """Base class for all Falcon MCP server modules."""
 
-    def __init__(self, client: FalconClient):
+    def __init__(self, client: FalconClient | None):
         """Initialize the module.
 
         Args:
-            client: Falcon API client
+            client: Falcon API client, or None in multi-tenant mode where every
+                request supplies its own credentials.
         """
-        self.client = client
+        self._process_client = client
         self.tools: list[str] = []  # List to track registered tools
         self.resources: list[str] = []  # List to track registered resources
+
+    @property
+    def client(self) -> FalconClient:
+        """The Falcon client to use for the call in progress.
+
+        Having a process client *is* what makes the server single-tenant, so that
+        one fact decides the mode. When there is none, the server is multi-tenant
+        and credentials must come from the request — which fails rather than
+        falling back, since a fallback would answer one tenant's request with
+        another's credentials.
+
+        Exposed as a property so every ``self.client.command(...)`` call site
+        across the modules keeps working unchanged.
+
+        Raises:
+            TenantContextError: multi-tenant, and the request carried no usable
+                tenant context.
+        """
+        if self._process_client is not None:
+            return self._process_client
+        return request_tenant_client()
 
     @abstractmethod
     def register_tools(self, server: FastMCP) -> None:
